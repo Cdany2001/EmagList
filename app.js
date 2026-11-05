@@ -98,7 +98,7 @@ function clearCache() {
 // and each data/cN.json holds 250 products, fetched when the scroller reaches them. Searching,
 // filtering and sorting look across the whole list, so those pull the rest in first.
 const DATA_DIR = 'data/';
-let CHUNK = 250, CHUNKS = 0, FIRST_ID = 1, chunkState = [], loadingAll = false;
+let CHUNK = 250, CHUNKS = 0, FIRST_ID = 1, chunkState = [], loadingAll = false, sweptAt = 0;
 const chunkOfRow = i => Math.floor(i / CHUNK);
 const chunkOfId = id => Math.floor((id - FIRST_ID) / CHUNK);
 const haveAll = () => CHUNKS > 0 && chunkState.every(v => v === 2);
@@ -211,6 +211,10 @@ const wholeListNeeded = () => !!(F.q.trim() || F.inc.length || F.exc.length || F
   F.dMin || F.dMax || F.lMin || F.lMax || F.hasEmag || F.cheaper || F.inList || F.sort !== 'order');
 async function loadEverything() {
   if (loadingAll || haveAll()) return;
+  // A chunk that 404s or times out leaves its slot at 0, so haveAll() stays false however many
+  // times we sweep. The caller re-renders when the sweep ends, sees an incomplete list and asks
+  // again: without this cooldown that is a loop that re-fetches the whole catalog on a tight spin.
+  if (sweptAt && Date.now() - sweptAt < 60e3) return;
   loadingAll = true;
   const todo = [];
   for (let k = 0; k < CHUNKS; k++) if (chunkState[k] !== 2) todo.push(k);
@@ -229,6 +233,7 @@ async function loadEverything() {
   };
   await Promise.all(Array.from({ length: 6 }, worker));
   loadingAll = false;
+  sweptAt = haveAll() ? 0 : Date.now();
 }
 
 // ---------------------------------------------------------------- data
@@ -520,7 +525,19 @@ async function fetchEmag(it, { deep = settings.deep } = {}) {
   }
   return rec;
 }
-const fresh = it => { const c = cache.get(it.id); return c && (c.ok || c.err === 'No results on eMag for this name') && Date.now() - c.t < settings.ttlHours * 3600e3; };
+// A record that failed is still a record. Without this a card whose lookup errored was never
+// fresh, so every scroll frame queued it again and it was retried without end for as long as it
+// stayed on screen -- the same flood as before, through a different door. An answer from eMag,
+// including "there is no such product", is believed for ttlHours; a request that never got there
+// is left alone for a quarter of an hour. The refresh button goes around this either way.
+const RETRY_AFTER = 15 * 60e3;
+const SETTLED = /^(No results on eMag for this name|No price found on the eMag page)$/;
+const fresh = it => {
+  const c = cache.get(it.id);
+  if (!c) return false;
+  const ttl = c.ok || SETTLED.test(c.err || '') ? settings.ttlHours * 3600e3 : RETRY_AFTER;
+  return Date.now() - c.t < ttl;
+};
 
 // fetch queue with concurrency; visible cards first
 const queue = []; const inflight = new Set();
@@ -533,7 +550,7 @@ function enqueue(it, front = false) {
   front ? queue.unshift(it) : queue.push(it);
   pump();
 }
-function dequeue(it) { const i = queue.indexOf(it); if (i >= 0) queue.splice(i, 1); }
+function dequeue(it) { if (!it) return; pinned.delete(it.id); const i = queue.indexOf(it); if (i >= 0) queue.splice(i, 1); }
 function pump() {
   while (inflight.size < Math.max(1, Math.min(6, settings.concurrency | 0)) && queue.length) {
     const it = queue.shift(); inflight.add(it.id); pinned.delete(it.id); refreshCard(it);
@@ -546,7 +563,10 @@ function filtered() {
   const qt = norm(F.q).split(/\s+/).filter(Boolean);
   const inc = F.inc, exc = F.exc, all = F.tagMode === 'all';
   const pMin = num(F.pMin), pMax = num(F.pMax), dMin = num(F.dMin), dMax = num(F.dMax), lMin = num(F.lMin), lMax = num(F.lMax);
-  const needDiff = F.hasEmag || F.cheaper || dMin != null || dMax != null || lMin != null || lMax != null;
+  // hasEmag asks only whether eMag quoted a price. It used to be folded in here, and diffOf()
+  // needs a list price as well, so the 61 products with no price in the source list were dropped
+  // from a filter that says nothing about the list price.
+  const needDiff = F.cheaper || dMin != null || dMax != null || lMin != null || lMax != null;
   const brand = norm(F.brand.trim());
   const list = F.inList ? new Set(wishlists.lists.find(l => l.id === F.inList)?.items || []) : null;
   const out = [];
@@ -561,6 +581,7 @@ function filtered() {
       if (inc.length && !(all ? inc.every(x => t.has(x)) : inc.some(x => t.has(x)))) continue;
     }
     if (qt.length) { const h = hayOf(it); if (!qt.every(x => h.includes(x))) continue; }
+    if (F.hasEmag && emagOf(it).price == null) continue;
     if (needDiff) {
       const d = diffOf(it);
       if (!d) continue;
@@ -708,6 +729,7 @@ function syncWindowQueue() {
   for (const it of want) enqueue(it);
 }
 function refreshCard(it) {
+  if (!it) return;   // an id from localStorage whose chunk has not been fetched yet
   const el = document.querySelector(`.card[data-id="${it.id}"]`);
   if (!el) return;
   const tmp = document.createElement('div'); tmp.innerHTML = cardHTML(it);
@@ -884,7 +906,13 @@ function renderWishlists() {
   };
 }
 function waitAndRender(fn) {
-  const t = setInterval(() => { if (!queue.length && !inflight.size) { clearInterval(t); fn(); } }, 800);
+  // a queue that is paused, or whose requests keep failing, never empties -- so give up after two
+  // minutes and draw what did arrive rather than polling for the rest of the session
+  let waited = 0;
+  const t = setInterval(() => {
+    waited += 800;
+    if ((!queue.length && !inflight.size) || waited > 120e3) { clearInterval(t); fn(); }
+  }, 800);
 }
 
 // ---------------------------------------------------------------- compare
@@ -967,7 +995,7 @@ function renderCompare() {
 // ---------------------------------------------------------------- detail sheet
 let detailItem = null;
 function openDetail(it) { detailItem = it; renderDetail(); const d = $('#detail'); if (!d.open) d.showModal(); }
-function refreshDetail(it) { if (detailItem?.id === it.id && $('#detail').open) renderDetail(); }
+function refreshDetail(it) { if (it && detailItem?.id === it.id && $('#detail').open) renderDetail(); }
 function renderDetail() {
   const it = detailItem, d = $('#detail'), e = emagOf(it), c = e.c, df = diffOf(it), o = overrides[it.id] || {};
   const tags = [...tagsOf(it)];
@@ -1108,7 +1136,8 @@ function renderSettings() {
   $('#sDef', v).onclick = () => { $('#sProx', v).value = DEFAULT_PROXIES.join('\n'); persist(); };
   $('#sTest', v).onclick = async () => {
     persist(); const out = $('#sTestOut', v); out.textContent = 'Testing…';
-    const it = ITEMS.find(i => i.price && i.name.length > 20);
+    const it = ITEMS.find(i => !i.pending && i.price && i.name.length > 20) || ITEMS.find(i => !i.pending && i.name);
+    if (!it) return void (out.textContent = 'The product list has not finished loading yet.');
     const t0 = performance.now();
     try {
       const r = parseSearch(await proxyFetch(searchURL(it)));
@@ -1171,9 +1200,12 @@ function updateBadges() {
   const n = new Set(wishlists.lists.flatMap(l => l.items)).size;
   $('#wlCount').textContent = n || '';
   $('#cmpCount').textContent = compare.length || '';
-  const sel = $('#inList'), cur = F.inList;
+  const sel = $('#inList');
+  // the list this filter points at may have just been deleted; leaving the dead id in place shows
+  // an empty catalog and no filter to clear
+  if (F.inList && !wishlists.lists.some(l => l.id === F.inList)) { F.inList = ''; saveF(); }
   sel.innerHTML = '<option value="">Everything</option>' + wishlists.lists.map(l => `<option value="${l.id}">${esc(l.name)} (${l.items.length})</option>`).join('');
-  sel.value = cur;
+  sel.value = F.inList;
 }
 function syncFilterUI() {
   $('#q').value = F.q; $('#sort').value = F.sort; $('#brand').value = F.brand;
@@ -1205,6 +1237,7 @@ function wire() {
   $('#grid').addEventListener('click', e => {
     const card = e.target.closest('.card'); if (!card) return;
     const it = BY_ID.get(+card.dataset.id), act = e.target.closest('[data-act]')?.dataset.act;
+    if (!it) return;   // a row whose chunk is still on its way draws a placeholder card
     if (act === 'open') openDetail(it);
     if (act === 'wish') toggleWish(it);
     if (act === 'cmp') toggleCompare(it);
