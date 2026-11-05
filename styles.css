@@ -369,6 +369,17 @@ table.cmp { border-collapse: separate; border-spacing: 0; min-width: 100%; font-
 .panel .row { margin-top: 10px; }
 .panel code { background: var(--paper); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
 
+/* The three ways of reaching eMag are each a fold: the one in use is open, the others stay out of
+   the way until somebody wants to switch. */
+.panel details { border-top: 1px solid var(--line); padding: 10px 0 2px; }
+.panel details summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: 2px 0; list-style: none; display: flex; align-items: center; gap: 8px; }
+.panel details summary::-webkit-details-marker { display: none; }
+.panel details summary::before { content: "▸"; color: var(--ink-2); transition: transform .15s; }
+.panel details[open] summary::before { transform: rotate(90deg); }
+.panel details p { margin: 8px 0; }
+.panel details p:last-of-type { margin-bottom: 4px; }
+.panel details a { color: var(--win); font-weight: 600; }
+
 /* toast + loading */
 .toast {
   position: fixed; left: 50%; top: 70px; transform: translate(-50%, -20px); opacity: 0; pointer-events: none; z-index: 60;

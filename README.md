@@ -15,31 +15,45 @@ A static catalog of the 34,083 products from *Listă produse – Preț BF Promo 
 
 ## How eMag data is loaded
 
-eMag has no public API that a static site can call, and browsers block direct requests to emag.ro from another site (CORS). The app reads eMag's search and product pages through a public CORS proxy and caches the result in IndexedDB, so each product is fetched at most once every 72 hours (configurable).
+eMag has no public API, and a page served from github.io is not allowed to read emag.ro's replies: the
+browser fetches them and then refuses to hand them to a script from another origin. Something on your
+own device has to make the request instead. There are three ways, and **Settings → Where eMag prices
+come from** picks between them (the default, *Whatever is available*, tries them in this order):
 
-- Cards on screen load automatically. "Load eMag prices for these" loads the whole filtered view.
-- Proxies are set in **Settings** (one per line, `{url}` = encoded eMag address). The defaults are allorigins, corsproxy.io, and codetabs.
-- If eMag picks the wrong product or blocks a request, open the product and paste the exact eMag link or type the price under **Fix the eMag match**.
+**1. A userscript — nothing to run.** Install [Tampermonkey](https://www.tampermonkey.net/) or
+Violentmonkey, then open [`tools/emaglist.user.js`](tools/emaglist.user.js) and confirm the install.
+It fetches eMag inside your browser and hands the page back. It only touches `emag.ro`, and only on
+this site.
 
-### Optional: your own proxy (more reliable)
+**2. The extension — also nothing to run.** Download `tools/extension/`, open `chrome://extensions`,
+switch on Developer mode and press *Load unpacked* on that folder. Same job, same limits, no
+userscript manager needed.
 
-Public proxies are shared and rate-limited. A free Cloudflare Worker gives you a private one. Create a Worker with the code below, then put `https://YOUR-WORKER.workers.dev/?url={url}` first in Settings.
+**3. A reader on this computer.** In the project folder:
 
-```js
-export default {
-  async fetch(req) {
-    const target = new URL(req.url).searchParams.get('url');
-    if (!target || !/^https:\/\/www\.emag\.ro\//.test(target)) return new Response('Only emag.ro', { status: 400 });
-    const r = await fetch(target, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'ro-RO,ro;q=0.9' } });
-    return new Response(await r.text(), { status: r.status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
-  },
-};
 ```
+node tools/emag-proxy.js
+```
+
+It listens on `http://127.0.0.1:8787`, fetches eMag three requests at a time with a 250 ms gap, keeps
+each answer for half an hour, and refuses any address that is not eMag — and any caller that is not
+this site. `PORT=9000 node tools/emag-proxy.js` moves it; set the same number in Settings.
+
+Public CORS proxies are still in Settings as a last resort, but somebody else's server then sees your
+whole list and can be blocked or switched off without warning. Every public one was failing when this
+was written.
+
+Whichever way the request goes, the result is cached in IndexedDB, so each product is read at most
+once every 72 hours (configurable). Cards on screen load on their own; *Load eMag prices for these*
+does the whole filtered view. If eMag picks the wrong product, open the product and paste the exact
+eMag link or the price under **Fix the eMag match**.
 
 ## Files
 
 - `index.html`, `styles.css`, `app.js`: the app (no build step)
-- `products.json` (or `data/products.json`): products as `[nr, name, price, brandIndex, [tagIndexes]]`, with `tags` and `brands` lookup tables
+- `data/index.json` + `data/c0.json`…`c136.json`: the catalog in 250-product chunks, fetched as you scroll. The index holds the product count, the tag and brand tables and a count per tag, which is enough to lay out all 34,083 rows before any of them have arrived
+- `products.json`: the whole list as `[nr, name, price, brandIndex, [tagIndexes]]`. Nothing fetches it; it is the source `tools/split-data.js` splits into `data/`
+- `tools/emag-proxy.js`, `tools/emaglist.user.js`, `tools/extension/`: the three ways of reading eMag from your own device
 - 117 products have the name `0` and 216 have no name in the source PDF. They are kept and tagged `no-name`. 61 products have no price and are tagged `no-price`.
 
 ## Deploy

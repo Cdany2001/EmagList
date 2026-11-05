@@ -32,13 +32,17 @@ const DEFAULT_PROXIES = [
   'https://api.codetabs.com/v1/proxy/?quest={url}',
 ];
 const settings = Object.assign({
-  proxies: DEFAULT_PROXIES, lastProxy: 0, autoFetch: true, deep: true, concurrency: 3, ttlHours: 72, theme: 'system', v: 3,
+  proxies: DEFAULT_PROXIES, lastProxy: 0, source: 'auto', localPort: 8787,
+  autoFetch: true, deep: true, concurrency: 3, ttlHours: 72, theme: 'system', v: 4,
 }, load('el.settings', {}));
 const saveSettings = () => save('el.settings', settings);
 // v2 switched auto-loading off because every card ever appended kept its own request slot and the
 // public proxies answered 400/500 by the hundred. v3 loads on demand instead: only the rows the
 // virtual scroller is showing are ever queued, so the request budget is one screen, not the catalog.
 if ((settings.v | 0) < 3) { settings.autoFetch = true; settings.v = 3; saveSettings(); }
+// v4 stops leading with the public proxies: every one of them was answering with an error or
+// nothing at all, so the device itself asks eMag now and the proxies are only the fallback.
+if ((settings.v | 0) < 4) { settings.source = 'auto'; settings.localPort = 8787; settings.v = 4; saveSettings(); }
 
 let wishlists = load('el.wishlists', null) || { lists: [{ id: uid(), name: 'My wishlist', budget: null, items: [] }], active: null };
 if (!wishlists.active) wishlists.active = wishlists.lists[0]?.id;
@@ -267,7 +271,81 @@ function isBlocked(html) {
   return /are you a robot|access denied|cf-chl|attention required|<title>[^<]*captcha/i.test(html.slice(0, 6000));
 }
 let failStreak = 0, paused = false;
-async function proxyFetch(url) {
+
+// Three ways to reach eMag, all but the last one running on this device.
+//
+// A page cannot read emag.ro itself: the browser makes the request but refuses to hand the reply to
+// a script from another origin, and eMag sends nothing that would waive that. So something else on
+// the machine has to ask and pass the answer in.
+//   bridge   a userscript or the little extension in tools/ -- the request goes out of this browser,
+//            from this address, and the bridge hands the page what came back. Nothing to run.
+//   local    tools/emag-proxy.js listening on localhost, which fetches and answers with CORS headers.
+//   proxies  somebody else's CORS proxy. Kept for the case where neither of the above is set up,
+//            but all the public ones were failing when this was written, so it is no longer first.
+let bridgeVia = '';
+const bridgeWait = new Map();
+let askId = 0;
+window.addEventListener('message', e => {
+  if (e.source !== window || e.origin !== location.origin) return;
+  const d = e.data;
+  if (!d || typeof d !== 'object') return;
+  if (d.emaglist === 'here') {
+    const first = !bridgeVia;
+    bridgeVia = d.via === 'extension' ? 'extension' : 'userscript';
+    if (first) {
+      paused = false; failStreak = 0;
+      if (!$('#view-settings').hidden) renderSettings();
+      syncWindowQueue();
+    }
+  } else if (d.emaglist === 'say' && bridgeWait.has(d.id)) {
+    const w = bridgeWait.get(d.id); bridgeWait.delete(d.id);
+    if (d.ok) w.ok(d.body || '');
+    else w.err(new Error(d.error || ('eMag answered ' + (d.status || 'nothing'))));
+  }
+});
+// the bridge loads before this script and says hello to nobody, so ask once it is listening
+window.postMessage({ emaglist: 'ask', hello: true }, location.origin);
+
+function viaBridge(url) {
+  if (!bridgeVia) throw new Error('No userscript or extension on this page');
+  return new Promise((ok, err) => {
+    const id = ++askId;
+    bridgeWait.set(id, { ok, err });
+    setTimeout(() => { if (bridgeWait.delete(id)) err(new Error('Timed out')); }, 25000);
+    window.postMessage({ emaglist: 'ask', id, url }, location.origin);
+  });
+}
+
+const localBase = () => 'http://127.0.0.1:' + (settings.localPort || 8787);
+let localOK = null, localProbe = null;
+function probeLocal() {
+  if (localProbe) return localProbe;
+  localProbe = (async () => {
+    try {
+      const r = await fetch(localBase() + '/ping', { signal: AbortSignal.timeout(2500) });
+      localOK = r.ok;
+    } catch { localOK = false; }
+    // it may be started after the page was opened, so the answer does not hold for long
+    setTimeout(() => { localProbe = null; }, 20000);
+    return localOK;
+  })();
+  return localProbe;
+}
+async function viaLocal(url) {
+  const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 25000);
+  try {
+    const r = await fetch(localBase() + '/?url=' + encodeURIComponent(url), { signal: ac.signal });
+    if (!r.ok) throw new Error('The reader answered ' + r.status + ': ' + (await r.text()).slice(0, 80));
+    localOK = true;
+    return await r.text();
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Timed out');
+    if (e instanceof TypeError) { localOK = false; localProbe = null; throw new Error('Nothing is listening on ' + localBase()); }
+    throw e;
+  } finally { clearTimeout(to); }
+}
+
+async function viaProxies(url) {
   const list = (settings.proxies || []).filter(Boolean);
   if (!list.length) throw new Error('No proxy set (Settings)');
   let last = 'All proxies failed';
@@ -286,6 +364,30 @@ async function proxyFetch(url) {
     } catch (e) { clearTimeout(to); last = e.name === 'AbortError' ? 'Timed out' : 'Network error'; }
   }
   throw new Error(last);
+}
+
+const SOURCE_NAMES = { bridge: 'the userscript or extension', local: 'this computer', proxies: 'a public proxy' };
+let usedSource = '';
+async function sourceOrder() {
+  const src = settings.source || 'auto';
+  if (src !== 'auto') return [src];
+  const order = [];
+  if (bridgeVia) order.push('bridge');
+  if (await probeLocal()) order.push('local');
+  if (!order.length) order.push('proxies');
+  return order;
+}
+async function proxyFetch(url) {
+  let last = '';
+  for (const how of await sourceOrder()) {
+    try {
+      const text = how === 'bridge' ? await viaBridge(url) : how === 'local' ? await viaLocal(url) : await viaProxies(url);
+      if (how !== 'proxies' && isBlocked(text)) throw new Error('eMag served a check page instead of the product');
+      usedSource = how;
+      return text;
+    } catch (e) { last = SOURCE_NAMES[how] + ': ' + e.message; }
+  }
+  throw new Error(last || 'Nothing is set up to read eMag (Settings)');
 }
 const absUrl = u => !u ? null : u.startsWith('//') ? 'https:' + u : u.startsWith('/') ? 'https://www.emag.ro' + u : u;
 function parsePriceEl(el) {
@@ -409,12 +511,12 @@ async function fetchEmag(it, { deep = settings.deep } = {}) {
     failStreak = 0;
   } catch (e) {
     rec.err = e.message;
-    if (/proxy|network|timed out|blocked|failed/i.test(e.message)) failStreak++;
+    if (/proxy|network|timed out|blocked|failed|listening|check page|not answering|did not answer/i.test(e.message)) failStreak++;
   }
   putCache(it.id, rec); it._tags = it._hay = null;
   if (failStreak >= 8 && settings.autoFetch && !paused) {
     paused = true;
-    toast('eMag is not answering through the proxy. Auto-loading paused; check Settings.');
+    toast('eMag is not answering. Auto-loading paused; check Settings.');
   }
   return rec;
 }
@@ -660,7 +762,7 @@ async function startBatch() {
   if (!haveAll()) { toast('Fetching the rest of the list first…'); await loadEverything(); RESULTS = filtered(); renderWindow(true); updateCountNow(); }
   const todo = RESULTS.filter(it => !it.pending && !fresh(it));
   if (!todo.length) return toast('Every product in this view already has fresh eMag data.');
-  if (todo.length > 300 && !confirm(`This loads eMag data for ${todo.length.toLocaleString('ro-RO')} products, about ${settings.deep ? 2 : 1} requests each through the proxy. It can take a long time and eMag may start blocking. Continue?`)) return;
+  if (todo.length > 300 && !confirm(`This loads eMag data for ${todo.length.toLocaleString('ro-RO')} products, about ${settings.deep ? 2 : 1} requests each. It can take a long time and eMag may start blocking. Continue?`)) return;
   paused = false; failStreak = 0;
   batch = { total: todo.length, done: 0, ids: new Set(todo.map(i => i.id)) };
   todo.forEach(it => enqueue(it));
@@ -931,14 +1033,45 @@ function renderDetail() {
 }
 
 // ---------------------------------------------------------------- settings
+function srcNote() {
+  const s = settings.source || 'auto';
+  if (s === 'bridge') return bridgeVia ? 'The ' + bridgeVia + ' is answering.' : 'Not installed on this page yet.';
+  if (s === 'local') return localOK === false ? 'Not running.' : localOK ? 'Answering.' : 'Start it, then test.';
+  if (s === 'proxies') return '';
+  if (bridgeVia) return 'Using the ' + bridgeVia + '.';
+  return 'No userscript or extension here, so: this computer, then a public proxy.';
+}
 function renderSettings() {
   const v = $('#view-settings');
   const nOk = [...cache.values()].filter(c => c.ok).length;
   v.innerHTML = `<div class="page-head"><h1>Settings</h1></div><div class="settings">
-    <div class="panel"><h2>eMag connection</h2>
-      <p>The site has no server, so eMag pages are read through public CORS proxies. Each line is one proxy; <code>{url}</code> is replaced with the encoded eMag address (<code>{raw}</code> for unencoded). The first one that works is reused.</p>
-      <textarea id="sProx" spellcheck="false">${esc(settings.proxies.join('\n'))}</textarea>
-      <div class="row"><button class="btn" id="sTest" type="button">Test connection</button><button class="link" id="sDef" type="button">Restore defaults</button><span id="sTestOut" class="note"></span></div>
+    <div class="panel"><h2>Where eMag prices come from</h2>
+      <p>This site is a static page with no server of its own, and eMag does not let a page read its replies. The request has to be made by something on this device: a userscript or the small extension (nothing to run), or the reader script on this computer.</p>
+      <div class="row"><label for="sSrc">Read eMag through</label><select id="sSrc" style="max-width:250px">
+        <option value="auto">Whatever is available</option>
+        <option value="bridge">The userscript or extension</option>
+        <option value="local">This computer</option>
+        <option value="proxies">A public CORS proxy</option>
+      </select><span class="note" id="sSrcNow">${srcNote()}</span></div>
+
+      <details class="section"${settings.source === 'local' || settings.source === 'proxies' ? '' : ' open'}><summary>Userscript or extension — nothing to run</summary>
+        <p>Both do the same thing: the page asks them for an eMag address, they fetch it in this browser and hand back the page. They only ever touch <code>emag.ro</code>, and only on this site.</p>
+        <p><strong>Userscript</strong> — install Tampermonkey or Violentmonkey, then open <a href="tools/emaglist.user.js">emaglist.user.js</a> and confirm. Reload this page afterwards.</p>
+        <p><strong>Extension</strong> — download <code>tools/extension/</code> from the repository, then in Chrome open <code>chrome://extensions</code>, switch on Developer mode and press “Load unpacked” on that folder.</p>
+      </details>
+
+      <details${settings.source === 'local' ? ' open' : ''}><summary>This computer — a reader you start yourself</summary>
+        <p>Run <code>node tools/emag-proxy.js</code> in the project folder and leave it open. It fetches eMag at three requests at a time, keeps each answer for half an hour and refuses any address that is not eMag.</p>
+        <div class="row"><label for="sPort">Port</label><input id="sPort" type="number" min="1" max="65535" value="${settings.localPort || 8787}" style="max-width:110px"><span class="note">matches <code>PORT=</code> if you moved it</span></div>
+      </details>
+
+      <details${settings.source === 'proxies' ? ' open' : ''}><summary>Public CORS proxy — last resort</summary>
+        <p>Somebody else's server fetches the page for you, which means your list goes through it and it can be blocked or switched off without warning. Every public one was failing when this was written. One per line; <code>{url}</code> becomes the encoded eMag address, <code>{raw}</code> the plain one.</p>
+        <textarea id="sProx" spellcheck="false">${esc(settings.proxies.join('\n'))}</textarea>
+        <div class="row"><button class="link" id="sDef" type="button">Restore defaults</button></div>
+      </details>
+
+      <div class="row section"><button class="btn" id="sTest" type="button">Test connection</button><span id="sTestOut" class="note"></span></div>
       <label class="check section"><input type="checkbox" id="sAuto" ${settings.autoFetch ? 'checked' : ''}> Load eMag data on demand, for the cards on screen</label>
       <label class="check"><input type="checkbox" id="sDeep" ${settings.deep ? 'checked' : ''}> Also read the eMag product page for category tags and specifications (2 requests per product)</label>
       <div class="row"><label for="sConc">Parallel requests</label><input id="sConc" type="number" min="1" max="6" value="${settings.concurrency}" style="max-width:90px">
@@ -958,12 +1091,17 @@ function renderSettings() {
     </div>
   </div>`;
   $('#sTheme', v).value = settings.theme;
+  $('#sSrc', v).value = settings.source || 'auto';
   const persist = () => {
     settings.proxies = $('#sProx', v).value.split('\n').map(s => s.trim()).filter(Boolean);
+    settings.source = $('#sSrc', v).value;
+    const port = Math.max(1, Math.min(65535, parseInt($('#sPort', v).value) || 8787));
+    if (port !== settings.localPort) { settings.localPort = port; localOK = null; localProbe = null; }
     settings.autoFetch = $('#sAuto', v).checked; settings.deep = $('#sDeep', v).checked;
     settings.concurrency = Math.max(1, Math.min(6, parseInt($('#sConc', v).value) || 3));
     settings.ttlHours = Math.max(1, parseInt($('#sTtl', v).value) || 72);
     settings.theme = $('#sTheme', v).value; applyTheme(); paused = false; failStreak = 0; saveSettings(); syncWindowQueue();
+    $('#sSrcNow', v).textContent = srcNote();
   };
   v.onchange = persist;
   $('#sDef', v).onclick = () => { $('#sProx', v).value = DEFAULT_PROXIES.join('\n'); persist(); };
@@ -971,7 +1109,14 @@ function renderSettings() {
     persist(); const out = $('#sTestOut', v); out.textContent = 'Testing…';
     const it = ITEMS.find(i => i.price && i.name.length > 20);
     const t0 = performance.now();
-    try { const r = parseSearch(await proxyFetch(searchURL(it))); out.textContent = r.length ? `Works: ${r.length} eMag results in ${Math.round(performance.now() - t0)} ms via proxy ${settings.lastProxy + 1}.` : 'The proxy answered but the page had no products. eMag may be serving a check page.'; }
+    try {
+      const r = parseSearch(await proxyFetch(searchURL(it)));
+      const how = SOURCE_NAMES[usedSource] || usedSource;
+      out.textContent = r.length
+        ? `Works: ${r.length} eMag results in ${Math.round(performance.now() - t0)} ms, through ${how}.`
+        : `The request got through ${how}, but the page had no products on it. eMag may be serving a check page.`;
+      $('#sSrcNow', v).textContent = srcNote();
+    }
     catch (e) { out.textContent = 'Failed: ' + e.message; }
   };
   $('#sClear', v).onclick = () => { if (confirm('Delete all saved eMag prices, pictures and specs?')) { clearCache(); countTags(); renderSettings(); toast('Saved eMag data cleared'); } };
