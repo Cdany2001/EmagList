@@ -242,7 +242,14 @@ async function fetchEmag(it, { deep = settings.deep } = {}) {
     } else {
       const list = parseSearch(await proxyFetch(searchURL(it)));
       if (!list.length) throw new Error('No results on eMag for this name');
-      for (const r of list.slice(0, 12)) { r.score = matchScore(it, r.title); if (!best || r.score > best.score) best = r; }
+      // eMag cannot be asked for a product by title, so this is the second of two calls: search by
+      // name, take the result whose name matches ours exactly (usually the first one), and only fall
+      // back to the best token score. Earlier results win a near-tie.
+      const want = norm(it.name);
+      // the list names are capped at 255 characters, so an eMag title can be our name plus more
+      best = list.find(r => { const t = norm(r.title); return t === want || (want.length > 25 && (t.startsWith(want) || want.startsWith(t))); }) || null;
+      if (best) best.score = 1;
+      else list.slice(0, 12).forEach((r, i) => { r.score = matchScore(it, r.title) - i * 0.01; if (!best || r.score > best.score) best = r; });
     }
     Object.assign(rec, { url: best.url, title: best.title, img: best.img, price: best.price, old: best.old, score: +best.score.toFixed(2) });
     if (deep || best.price == null) {
