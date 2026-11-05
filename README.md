@@ -86,6 +86,12 @@ one — because a budget needs somewhere to live.
 Keys: `/` search, `g` then `c d l b k s` for the pages, `f` more filters, `t` sections, `←`/`→`
 paging, `Esc` clears the search.
 
+**On a phone** the six pages move to a bar along the bottom edge, within thumb reach, each
+carrying its own count in the corner. The title and the filters scroll away rather than holding a
+third of the screen, every control grows to a size a thumb can hit, and text fields are set at 16px
+because anything smaller makes Safari zoom the whole page the moment you tap one. Nothing is cut
+off down to 320px, the narrowest phone still in use.
+
 ## How it works
 
 1. **The list is hardcoded.** `products.json` holds all 34,083 rows as `[nr, name, price, brandIndex, [tagIndexes]]` — 3.6 MB raw, about 880 KB gzipped — and is shown 60 products a page.

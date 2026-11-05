@@ -4,6 +4,11 @@
    the control radius, the card surface and the hairline. A button on the budget page is the same
    object as a button in the filter bar, which is why they look alike without being special-cased. */
 
+/* The hidden attribute is display:none from the browser, which any class that sets
+   display quietly outranks -- which is how both filter trays stayed on screen while
+   the page believed it had collapsed them. Nothing is hidden by accident now. */
+[hidden] { display: none !important; }
+
 :root {
   --paper: #EEF1F6; --card: #FFFFFF; --ink: #1C2140; --ink-2: #4A5070; --line: #D6DBE6;
   --sticker: #FFD23F; --sticker-ink: #1C2140;
@@ -115,8 +120,12 @@ input[type="checkbox"] {
 .stack .inline { margin-top: 8px; }
 
 /* --------------------------------------------------------------- header */
+/* The title block and the filter bar stick as one piece. They used to stick
+   separately, with the bar offset by a hardcoded 63px that no longer matched the
+   72px the header actually measures, so nine pixels of it slid underneath. */
+.head { position: sticky; top: 0; z-index: 30; }
 .top {
-  position: sticky; top: 0; z-index: 30;
+  z-index: 30;
   background: var(--glass); backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
@@ -155,7 +164,7 @@ h1 span { color: var(--ink-2); font-weight: 600; }
 
 /* --------------------------------------------------------------- the filter bar */
 .bar {
-  position: sticky; top: 63px; z-index: 20;
+  z-index: 20;
   background: var(--glass); backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
@@ -515,10 +524,103 @@ main { padding-bottom: 26px; }
 @media (max-width: 760px) {
   .top .wrap { flex-wrap: wrap; row-gap: 10px; }
   .views { order: 3; width: 100%; margin-left: 0; }
-  .bar { top: 0; }
   #count { white-space: normal; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(152px, 1fr)); gap: 10px; }
   .page-head { padding-top: 16px; }
   .field { flex: 1 1 100%; justify-content: space-between; }
   .in.sm { width: 100px; }
+}
+
+/* ---------------------------------------------------------------- phone
+   A phone is not a narrow desktop, so three things change. The control tier
+   grows, through the same token the whole page is built from, so a thumb can
+   hit what a mouse could. The page navigation moves to the bottom edge, where
+   a thumb already is, instead of a strip that ran off the side. And only one
+   thing stays stuck to the top: the filter bar, because that is the thing you
+   reach for while scrolling a list. */
+@media (max-width: 620px) {
+  :root { --h: 42px; --pad: 0 12px; }
+  body { -webkit-tap-highlight-color: transparent; }
+  .wrap {
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+
+  /* The header scrolls away. Two stacked sticky bars took 109px off an 812px
+     screen and then slid over each other, because each was stuck to the top. */
+  /* backdrop-filter on an ancestor makes it the containing block for anything
+     fixed inside it, which pinned the bottom bar to the top of the screen. The
+     header is not sticky here, so it has no use for the glass. */
+  .top { position: static; backdrop-filter: none; background: transparent; }
+  .top .wrap { flex-wrap: nowrap; gap: 10px; padding-block: 10px; }
+  h1 { font-size: 20px; }
+  #count { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Stacked into rows of two, the toolbar is a third of a phone screen, and a
+     sticky thing taller than the screen cannot be scrolled past at all. It stays
+     at the top of the page instead, and the bottom bar carries the navigation. */
+  .head { position: static; }
+  .page-head { padding-top: 14px; }
+
+  /* Six pages across the bottom edge, each with room for its own badge. */
+  .views {
+    position: fixed; inset: auto 0 0 0; z-index: 40;
+    margin: 0; gap: 3px; border-radius: 0; overflow: visible;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    background: var(--glass); backdrop-filter: blur(10px);
+    border-top: 1px solid var(--line);
+  }
+  .views a {
+    flex: 1 1 0; min-width: 0; justify-content: center; gap: 3px;
+    padding: 9px 2px; font-size: 11px; overflow: hidden;
+  }
+  /* The count rides in the corner of its tab rather than beside the label, which
+     is what keeps a word like Compare from being cut off on a narrow phone. */
+  .views a { position: relative; }
+  .views b {
+    position: absolute; top: 1px; right: 3px;
+    min-width: 14px; padding: 0 3px; font-size: 9px; line-height: 1.7;
+  }
+  main { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .toast { bottom: calc(80px + env(safe-area-inset-bottom)); }
+
+  /* Anything under 16px makes Safari enlarge the whole page on focus. */
+  .in, input, select, textarea { font-size: 16px; }
+  .in.sm, .ghost.sm, .pg.sm { height: 36px; }
+  .ghost.sm, .pg.sm { font-size: 14px; }
+  .in.sm { font-size: 16px; }
+
+  /* The filter bar in rows of two, with the search box to itself. */
+  .in.grow { flex: 1 1 100%; }
+  /* min-width:0 or the select refuses to go narrower than its longest option
+     ("List price, low to high") and takes a whole row to itself. */
+  #brand, #sort { flex: 1 1 calc(50% - 4px); min-width: 0; }
+  .barrow .ghost { flex: 1 1 calc(50% - 4px); justify-content: center; }
+  .barrow .check { width: 100%; justify-content: center; }
+  .railhead { gap: 8px; }
+  .railhead .seg, .railhead .note-in { flex: 1 1 100%; }
+  .seg { justify-content: center; }
+  .seg button { flex: 1; padding: 0 10px; }
+  .tagrail { max-height: 44vh; }
+  .chip { height: 34px; padding: 0 12px; }
+  .field { gap: 10px; }
+  .field .in { width: auto; flex: 0 1 148px; }
+
+  /* Five things you can do to a card, in two rows you can actually hit,
+     rather than five 29px slivers side by side. */
+  .acts { flex-wrap: wrap; }
+  .acts a, .acts .ico { flex: 1 0 30%; width: auto; min-height: 44px; padding: 0; }
+  .ract .ico { width: 40px; min-height: 40px; }
+  .pg { min-width: 42px; }
+  .stats { grid-template-columns: 1fr 1fr; }
+  .cmpwrap { max-height: 70vh; }
+  .cmp th, .cmp td { padding: 9px 10px; }
+  .cmp tbody th { width: 92px; }
+}
+
+/* Six labels across a 320px screen: the smallest phones still in use. */
+@media (max-width: 360px) {
+  .views { gap: 2px; padding-inline: 4px; }
+  .views a { padding: 9px 1px; font-size: 10px; gap: 2px; }
+  .views b { min-width: 12px; font-size: 8.5px; top: 0; right: 1px; }
+  h1 { font-size: 18px; }
 }
