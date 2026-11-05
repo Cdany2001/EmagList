@@ -32,12 +32,13 @@ const DEFAULT_PROXIES = [
   'https://api.codetabs.com/v1/proxy/?quest={url}',
 ];
 const settings = Object.assign({
-  proxies: DEFAULT_PROXIES, lastProxy: 0, autoFetch: false, deep: true, concurrency: 3, ttlHours: 72, theme: 'system', v: 2,
+  proxies: DEFAULT_PROXIES, lastProxy: 0, autoFetch: true, deep: true, concurrency: 3, ttlHours: 72, theme: 'system', v: 3,
 }, load('el.settings', {}));
 const saveSettings = () => save('el.settings', settings);
-// Public proxies answer 400/500 far more often than they answer a price, and auto-loading fired one
-// request per card on screen. Off by default now; load prices from the button when you want them.
-if ((settings.v | 0) < 2) { settings.autoFetch = false; settings.v = 2; saveSettings(); }
+// v2 switched auto-loading off because every card ever appended kept its own request slot and the
+// public proxies answered 400/500 by the hundred. v3 loads on demand instead: only the rows the
+// virtual scroller is showing are ever queued, so the request budget is one screen, not the catalog.
+if ((settings.v | 0) < 3) { settings.autoFetch = true; settings.v = 3; saveSettings(); }
 
 let wishlists = load('el.wishlists', null) || { lists: [{ id: uid(), name: 'My wishlist', budget: null, items: [] }], active: null };
 if (!wishlists.active) wishlists.active = wishlists.lists[0]?.id;
@@ -120,7 +121,11 @@ const emagLink = it => emagOf(it).url || searchURL(it);
 
 // ---------------------------------------------------------------- eMag fetching (via CORS proxy)
 function isBlocked(html) {
-  return html.length < 600 || /captcha|are you a robot|access denied|cf-chl|attention required/i.test(html.slice(0, 6000));
+  if (html.length < 600) return true;
+  // Every normal eMag page ships EM.google_recaptcha_keys in its head, so the word 'captcha' on its
+  // own used to condemn perfectly good pages. Product markup is the honest signal that one loaded.
+  if (html.includes('card-item') || html.includes('product-new-price')) return false;
+  return /are you a robot|access denied|cf-chl|attention required|<title>[^<]*captcha/i.test(html.slice(0, 6000));
 }
 let failStreak = 0, paused = false;
 async function proxyFetch(url) {
@@ -278,7 +283,11 @@ const fresh = it => { const c = cache.get(it.id); return c && (c.ok || c.err ===
 
 // fetch queue with concurrency; visible cards first
 const queue = []; const inflight = new Set();
+// asked for by hand (detail sheet, refresh button, batch): kept in the queue even once the card
+// scrolls out of the window
+const pinned = new Set();
 function enqueue(it, front = false) {
+  if (front) pinned.add(it.id);
   if (inflight.has(it.id) || queue.includes(it)) return;
   front ? queue.unshift(it) : queue.push(it);
   pump();
@@ -286,7 +295,7 @@ function enqueue(it, front = false) {
 function dequeue(it) { const i = queue.indexOf(it); if (i >= 0) queue.splice(i, 1); }
 function pump() {
   while (inflight.size < Math.max(1, Math.min(6, settings.concurrency | 0)) && queue.length) {
-    const it = queue.shift(); inflight.add(it.id); refreshCard(it);
+    const it = queue.shift(); inflight.add(it.id); pinned.delete(it.id); refreshCard(it);
     fetchEmag(it).finally(() => { inflight.delete(it.id); refreshCard(it); refreshDetail(it); batchTick(); updateCount(); debCount(); pump(); });
   }
 }
@@ -397,17 +406,8 @@ function cardHTML(it) {
     </div>
   </article>`;
 }
-const io = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
-  for (const en of entries) {
-    const it = BY_ID.get(+en.target.dataset.id); if (!it) continue;
-    if (en.isIntersecting) { if (settings.autoFetch && !paused && !fresh(it)) enqueue(it); }
-    else if (!inflight.has(it.id)) dequeue(it);
-  }
-}, { rootMargin: '200px' }) : null;
-
 function renderCatalog(resetScroll = true) {
   RESULTS = filtered();
-  if (io) io.disconnect();
   $('#grid').innerHTML = ''; firstRow = lastRow = -1;
   if (resetScroll && window.scrollY > 300) window.scrollTo({ top: 0 });
   renderWindow(true);
@@ -449,14 +449,23 @@ function renderWindow(force = false) {
   out.push(RESULTS.slice(first * cols, (last + 1) * cols).map(cardHTML).join(''));
   if (below > 0) out.push('<div class="vspace" style="height:' + (below * rowH - gap) + 'px"></div>');
   g.innerHTML = out.join('');
-  if (io) { io.disconnect(); $$('.card', g).forEach(el => io.observe(el)); }
+  syncWindowQueue();
+}
+// On demand means on screen: the rows the virtual scroller just drew are the only ones worth a
+// request. Rows that scrolled away and have not started yet leave the queue again, so a fast scroll
+// through 34,083 products spends its requests on where you stopped, not on everything you passed.
+function syncWindowQueue() {
+  if (batch || !settings.autoFetch || paused || firstRow < 0) return;
+  const want = RESULTS.slice(firstRow * cols, (lastRow + 1) * cols).filter(it => !fresh(it) && !inflight.has(it.id));
+  const keep = new Set(want.map(it => it.id));
+  for (let i = queue.length - 1; i >= 0; i--) if (!keep.has(queue[i].id) && !pinned.has(queue[i].id)) queue.splice(i, 1);
+  for (const it of want) enqueue(it);
 }
 function refreshCard(it) {
   const el = document.querySelector(`.card[data-id="${it.id}"]`);
   if (!el) return;
   const tmp = document.createElement('div'); tmp.innerHTML = cardHTML(it);
   const nu = tmp.firstElementChild; el.replaceWith(nu);
-  if (io) io.observe(nu);
 }
 let scrollTick = false;
 window.addEventListener('scroll', () => {
@@ -777,7 +786,7 @@ function renderSettings() {
       <p>The site has no server, so eMag pages are read through public CORS proxies. Each line is one proxy; <code>{url}</code> is replaced with the encoded eMag address (<code>{raw}</code> for unencoded). The first one that works is reused.</p>
       <textarea id="sProx" spellcheck="false">${esc(settings.proxies.join('\n'))}</textarea>
       <div class="row"><button class="btn" id="sTest" type="button">Test connection</button><button class="link" id="sDef" type="button">Restore defaults</button><span id="sTestOut" class="note"></span></div>
-      <label class="check section"><input type="checkbox" id="sAuto" ${settings.autoFetch ? 'checked' : ''}> Load eMag data automatically for cards on screen</label>
+      <label class="check section"><input type="checkbox" id="sAuto" ${settings.autoFetch ? 'checked' : ''}> Load eMag data on demand, for the cards on screen</label>
       <label class="check"><input type="checkbox" id="sDeep" ${settings.deep ? 'checked' : ''}> Also read the eMag product page for category tags and specifications (2 requests per product)</label>
       <div class="row"><label for="sConc">Parallel requests</label><input id="sConc" type="number" min="1" max="6" value="${settings.concurrency}" style="max-width:90px">
         <label for="sTtl">Refresh after (hours)</label><input id="sTtl" type="number" min="1" value="${settings.ttlHours}" style="max-width:100px"></div>
@@ -801,7 +810,7 @@ function renderSettings() {
     settings.autoFetch = $('#sAuto', v).checked; settings.deep = $('#sDeep', v).checked;
     settings.concurrency = Math.max(1, Math.min(6, parseInt($('#sConc', v).value) || 3));
     settings.ttlHours = Math.max(1, parseInt($('#sTtl', v).value) || 72);
-    settings.theme = $('#sTheme', v).value; applyTheme(); paused = false; failStreak = 0; saveSettings();
+    settings.theme = $('#sTheme', v).value; applyTheme(); paused = false; failStreak = 0; saveSettings(); syncWindowQueue();
   };
   v.onchange = persist;
   $('#sDef', v).onclick = () => { $('#sProx', v).value = DEFAULT_PROXIES.join('\n'); persist(); };
