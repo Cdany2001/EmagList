@@ -32,9 +32,12 @@ const DEFAULT_PROXIES = [
   'https://api.codetabs.com/v1/proxy/?quest={url}',
 ];
 const settings = Object.assign({
-  proxies: DEFAULT_PROXIES, lastProxy: 0, autoFetch: true, deep: true, concurrency: 3, ttlHours: 72, theme: 'system',
+  proxies: DEFAULT_PROXIES, lastProxy: 0, autoFetch: false, deep: true, concurrency: 3, ttlHours: 72, theme: 'system', v: 2,
 }, load('el.settings', {}));
 const saveSettings = () => save('el.settings', settings);
+// Public proxies answer 400/500 far more often than they answer a price, and auto-loading fired one
+// request per card on screen. Off by default now; load prices from the button when you want them.
+if ((settings.v | 0) < 2) { settings.autoFetch = false; settings.v = 2; saveSettings(); }
 
 let wishlists = load('el.wishlists', null) || { lists: [{ id: uid(), name: 'My wishlist', budget: null, items: [] }], active: null };
 if (!wishlists.active) wishlists.active = wishlists.lists[0]?.id;
@@ -334,8 +337,11 @@ function filtered() {
 }
 
 // ---------------------------------------------------------------- catalog rendering
-let RESULTS = [], shown = 0;
-const PAGE = 48;
+let RESULTS = [];
+// Virtual scroll: 34,083 cards will not fit in the DOM, so only the rows in view (plus a couple
+// above and below) are rendered. Spacers stand in for the rest, so the scrollbar stays honest.
+const OVERSCAN = 2;
+let cols = 1, cardH = 0, gap = 16, firstRow = -1, lastRow = -1;
 const IC = {
   heart: '<svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.5-9.3C1.1 8.3 3.3 4.5 7 4.5c2.1 0 3.6 1.2 5 3 1.4-1.8 2.9-3 5-3 3.7 0 5.9 3.8 4.5 7.2C19.5 16.4 12 21 12 21z"/></svg>',
   cmp: '<svg viewBox="0 0 24 24"><path d="M4 6h7v14H4zM13 4h7v16h-7z"/></svg>',
@@ -373,7 +379,7 @@ function cardHTML(it) {
     <div class="body">
       <div class="brandline"><span>${esc(it.brand || '—')}</span><span>${esc(groups)}</span></div>
       <h3 class="name" data-act="open" title="${esc(it.name)}">${esc(it.name || '(no name in source file)')}</h3>
-      ${c?.ok && c.title ? `<div class="match ${low ? 'low' : ''}" title="${esc(c.title)}">${low ? 'Weak match: ' : 'eMag: '}${esc(c.title)}</div>` : ''}
+      <div class="match ${low ? 'low' : ''}"${c?.ok && c.title ? ` title="${esc(c.title)}"` : ''}>${c?.ok && c.title ? (low ? 'Weak match: ' : 'eMag: ') + esc(c.title) : ''}</div>
       <div class="prices"><div><span class="lbl">My list</span><span class="mine">${lei(it.price)}</span></div>${theirsHTML(it)}</div>
     </div>
     <div class="actions">
@@ -393,15 +399,15 @@ const io = 'IntersectionObserver' in window ? new IntersectionObserver(entries =
 }, { rootMargin: '200px' }) : null;
 
 function renderCatalog(resetScroll = true) {
-  RESULTS = filtered(); shown = 0;
-  const g = $('#grid'); g.innerHTML = '';
+  RESULTS = filtered();
   if (io) io.disconnect();
-  appendPage();
+  $('#grid').innerHTML = ''; firstRow = lastRow = -1;
+  if (resetScroll && window.scrollY > 300) window.scrollTo({ top: 0 });
+  renderWindow(true);
   $('#empty').hidden = RESULTS.length > 0;
   updateCountNow();
   const active = F.inc.length + F.exc.length + ['brand', 'pMin', 'pMax', 'dMin', 'dMax', 'lMin', 'lMax', 'inList'].filter(k => F[k]).length + (F.hasEmag ? 1 : 0) + (F.cheaper ? 1 : 0);
   $('#activeCount').textContent = active || '';
-  if (resetScroll && window.scrollY > 300) window.scrollTo({ top: 0 });
   renderTagChips();
 }
 function updateCountNow() {
@@ -409,12 +415,34 @@ function updateCountNow() {
   $('#count').innerHTML = `<strong>${RESULTS.length.toLocaleString('ro-RO')}</strong> products · ${withE.toLocaleString('ro-RO')} with an eMag price`;
 }
 const updateCount = debounce(updateCountNow, 700);
-function appendPage() {
+function measureGrid() {
+  const g = $('#grid'), cs = getComputedStyle(g);
+  cols = Math.max(1, cs.gridTemplateColumns.split(' ').filter(Boolean).length);
+  gap = parseFloat(cs.rowGap) || 0;
+  const probe = g.querySelector('.card');
+  cardH = probe ? probe.getBoundingClientRect().height : 0;
+}
+function renderWindow(force = false) {
   const g = $('#grid');
-  const slice = RESULTS.slice(shown, shown + PAGE);
-  g.insertAdjacentHTML('beforeend', slice.map(cardHTML).join(''));
-  shown += slice.length;
-  if (io) $$('.card', g).slice(-slice.length).forEach(el => io.observe(el));
+  if (!RESULTS.length) { g.innerHTML = ''; firstRow = lastRow = -1; return; }
+  if ($('#view-catalog').hidden) return;
+  if (!cardH) {
+    g.innerHTML = RESULTS.slice(0, 24).map(cardHTML).join('');
+    measureGrid(); firstRow = lastRow = -1;
+    if (!cardH) return;   // laid out at zero height; try again on the next scroll or resize
+  }
+  const rowH = cardH + gap, rows = Math.ceil(RESULTS.length / cols);
+  const viewTop = window.scrollY - (g.getBoundingClientRect().top + window.scrollY);
+  const first = Math.max(0, Math.floor(viewTop / rowH) - OVERSCAN);
+  const last = Math.min(rows - 1, Math.ceil((viewTop + window.innerHeight) / rowH) + OVERSCAN);
+  if (!force && first === firstRow && last === lastRow) return;
+  firstRow = first; lastRow = last;
+  const below = rows - 1 - last, out = [];
+  if (first > 0) out.push('<div class="vspace" style="height:' + (first * rowH - gap) + 'px"></div>');
+  out.push(RESULTS.slice(first * cols, (last + 1) * cols).map(cardHTML).join(''));
+  if (below > 0) out.push('<div class="vspace" style="height:' + (below * rowH - gap) + 'px"></div>');
+  g.innerHTML = out.join('');
+  if (io) { io.disconnect(); $$('.card', g).forEach(el => io.observe(el)); }
 }
 function refreshCard(it) {
   const el = document.querySelector(`.card[data-id="${it.id}"]`);
@@ -423,7 +451,13 @@ function refreshCard(it) {
   const nu = tmp.firstElementChild; el.replaceWith(nu);
   if (io) io.observe(nu);
 }
-const sentinelIO = 'IntersectionObserver' in window ? new IntersectionObserver(e => { if (e[0].isIntersecting && shown < RESULTS.length && !$('#view-catalog').hidden) appendPage(); }, { rootMargin: '800px' }) : null;
+let scrollTick = false;
+window.addEventListener('scroll', () => {
+  if (scrollTick) return;
+  scrollTick = true;
+  requestAnimationFrame(() => { scrollTick = false; renderWindow(); });
+}, { passive: true });
+window.addEventListener('resize', () => { cardH = 0; renderWindow(true); });
 
 // tag chips
 let TAG_COUNTS = new Map();
@@ -864,7 +898,6 @@ function wire() {
   for (const id of ['#detail', '#pickList']) $(id).addEventListener('click', e => { if (e.target === e.currentTarget || e.target.closest('[data-close]')) e.currentTarget.close(); });
   $('#detail').addEventListener('close', () => { detailItem = null; if (!$('#view-wishlists').hidden) renderWishlists(); if (!$('#view-compare').hidden) renderCompare(); });
   window.addEventListener('hashchange', route);
-  if (sentinelIO) sentinelIO.observe($('#sentinel'));
 }
 
 // ---------------------------------------------------------------- boot

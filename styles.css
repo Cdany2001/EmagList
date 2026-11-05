@@ -172,6 +172,8 @@ select, input[type="number"], input[type="search"], input[list], input[type="url
 
 /* cards */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+/* stand-ins for the rows the virtual scroller is not rendering */
+.vspace { grid-column: 1 / -1; }
 @media (max-width: 520px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } }
 .card {
   position: relative; background: var(--card); border-radius: var(--r-card); box-shadow: var(--shade);
@@ -199,6 +201,8 @@ select, input[type="number"], input[type="search"], input[list], input[type="url
 .card .brandline { font-size: 12px; font-weight: 700; color: var(--ink-2); display: flex; justify-content: space-between; gap: 6px; }
 .card .name {
   font-size: 14px; line-height: 1.35; margin: 0; cursor: pointer;
+  /* every card the same height, so the virtual scroller can trust one row height */
+  min-height: calc(3em * 1.35);
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 .prices { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin-top: auto; padding-top: 6px; align-items: end; }
@@ -208,7 +212,7 @@ select, input[type="number"], input[type="search"], input[list], input[type="url
 .prices .theirs .lbl { text-align: right; }
 .prices .theirs.na { font: 400 12px/1.3 var(--text); }
 .prices .old { font-size: 11px; text-decoration: line-through; color: var(--ink-2); display: block; }
-.match { font-size: 11px; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.match { font-size: 11px; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; min-height: 1.4em; }
 .match.low { color: var(--lose); }
 .actions { display: flex; gap: 6px; align-items: center; border-top: 1px solid var(--line); padding: 8px 10px; }
 .act {
