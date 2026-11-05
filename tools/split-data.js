@@ -26,7 +26,10 @@ for (let k = 0; k < chunks; k++) {
 // without the browser having downloaded any of them.
 const counts = new Array(D.tags.length).fill(0);
 for (const r of D.items) for (const i of new Set(r[4])) counts[i]++;
-const index = { count: D.items.length, chunk: CHUNK, chunks, firstId, sequential, tags: D.tags, counts, brands: D.brands };
+// A stamp over the data itself: the browser keeps the chunks it has fetched, and this is what
+// tells it to throw them away when the list is split again.
+const v = require('crypto').createHash('sha1').update(JSON.stringify(D.items)).digest('hex').slice(0, 10);
+const index = { v, count: D.items.length, chunk: CHUNK, chunks, firstId, sequential, tags: D.tags, counts, brands: D.brands };
 fs.writeFileSync(path.join(out, 'index.json'), JSON.stringify(index));
 
 const ix = fs.statSync(path.join(out, 'index.json')).size;

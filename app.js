@@ -109,9 +109,35 @@ async function loadIndex() {
   BASE_TAGS = ix.tags; BRANDS = ix.brands;
   TAG_SEED = ix.tags.map((t, i) => [t, ix.counts[i]]);
   CHUNK = ix.chunk; CHUNKS = ix.chunks; FIRST_ID = ix.firstId;
+  CHUNK_CACHE = 'emaglist-data-' + (ix.v || '1');
   chunkState = new Array(CHUNKS).fill(0);
   ITEMS = new Array(ix.count);
   for (let i = 0; i < ix.count; i++) ITEMS[i] = placeholder(i);
+}
+
+// Chunks are kept on disk once fetched, so scrolling back over ground you have already covered --
+// or reloading the page tomorrow -- costs nothing. Only chunks actually fetched are stored, so
+// this never adds up to the big download it replaced. Cache Storage needs a secure origin, which
+// github.io and localhost both are; anywhere else this quietly falls back to the network.
+let CHUNK_CACHE = '', chunkStore;
+async function openChunkStore() {
+  if (chunkStore !== undefined) return chunkStore;
+  try {
+    chunkStore = await caches.open(CHUNK_CACHE);
+    const stale = (await caches.keys()).filter(k => k.startsWith('emaglist-data-') && k !== CHUNK_CACHE);
+    stale.forEach(k => caches.delete(k));
+  } catch { chunkStore = null; }
+  return chunkStore;
+}
+async function fetchChunk(url) {
+  const store = await openChunkStore();
+  if (store) {
+    const hit = await store.match(url).catch(() => null);
+    if (hit) return hit;
+  }
+  const r = await fetch(url);
+  if (r.ok && store) store.put(url, r.clone()).catch(() => {});
+  return r;
 }
 
 const chunkWait = new Map();
@@ -120,7 +146,7 @@ function loadChunk(k) {
   if (chunkWait.has(k)) return chunkWait.get(k);
   const p = (async () => {
     try {
-      const r = await fetch(DATA_DIR + 'c' + k + '.json');
+      const r = await fetchChunk(DATA_DIR + 'c' + k + '.json');
       if (!r.ok) throw new Error('chunk ' + k + ' is missing');
       const rows = await r.json(), at = k * CHUNK;
       for (let j = 0; j < rows.length; j++) {
@@ -144,6 +170,27 @@ function ensureRows(from, to) {
   for (let k = a; k <= b && k < CHUNKS; k++) if (chunkState[k] !== 2) jobs.push(loadChunk(k));
   if (jobs.length) Promise.all(jobs).then(got => got.some(Boolean) && catalogGrew());
 }
+// A screen of lookahead, in the direction you are scrolling: by the time those rows reach the
+// viewport their chunk is already in, so they arrive with their names and prices rather than as
+// grey bars. Scroll the other way and the lookahead turns round with you.
+let lastFirst = 0;
+function prefetchAhead(first, last) {
+  if (CHUNKS === 0) return;
+  const span = Math.max(1, last - first + 1);
+  const down = first >= lastFirst;
+  lastFirst = first;
+  const fromRow = down ? last + 1 : Math.max(0, first - span);
+  const toRow = down ? last + span : Math.max(0, first - 1);
+  if (toRow < fromRow) return;
+  // A chunk holds 250 products, far more than the twenty-odd on screen, so a screen of lookahead
+  // usually lands inside the chunk already loaded. The chunk past it is the one a continuous scroll
+  // runs into next, and 26 KB is a cheap price for never meeting grey bars on the way.
+  const lo = chunkOfRow(fromRow * cols), hi = chunkOfRow((toRow + 1) * cols - 1);
+  const edge = down ? hi + 1 : lo - 1;
+  for (let k = Math.min(lo, edge); k <= Math.max(hi, edge) && k < CHUNKS; k++)
+    if (k >= 0 && chunkState[k] !== 2) loadChunk(k);
+}
+
 async function ensureIds(ids) {
   const ks = [...new Set(ids.map(chunkOfId))].filter(k => k >= 0 && k < CHUNKS && chunkState[k] !== 2);
   if (!ks.length) return false;
@@ -545,6 +592,7 @@ function renderWindow(force = false) {
   if (below > 0) out.push('<div class="vspace" style="height:' + (below * rowH - gap) + 'px"></div>');
   g.innerHTML = out.join('');
   ensureRows(first * cols, (last + 1) * cols);
+  prefetchAhead(first, last);
   syncWindowQueue();
 }
 // On demand means on screen: the rows the virtual scroller just drew are the only ones worth a
