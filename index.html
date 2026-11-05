@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BF list vs eMag</title>
 <meta name="description" content="The Black Friday promo list, page by page, with each product's current eMag price fetched when the card reaches the screen.">
+<meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#127991;</text></svg>">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
@@ -18,11 +19,18 @@
       <h1>BF list <span>vs</span> eMag</h1>
       <p id="count">loading the list&hellip;</p>
     </div>
-    <button id="theme" class="ghost" type="button" title="Light or dark">&#9680;</button>
+    <nav class="views" aria-label="Views">
+      <a href="#/catalog" data-view="catalog">Catalog</a>
+      <a href="#/deals" data-view="deals">Top deals</a>
+      <a href="#/liked" data-view="liked">Liked <b id="nWish"></b></a>
+      <a href="#/compare" data-view="compare">Compare <b id="nCmp"></b></a>
+      <a href="#/settings" data-view="settings" title="Settings">Settings</a>
+    </nav>
+    <button id="theme" class="ghost ico-btn" type="button" title="Light or dark" aria-label="Light or dark">&#9680;</button>
   </div>
 </header>
 
-<section class="bar">
+<section class="bar" id="bar">
   <div class="wrap">
     <input id="q" type="search" placeholder="Search the list&hellip;" autocomplete="off" aria-label="Search by name, brand or tag">
     <input id="brand" list="brands" placeholder="Brand" autocomplete="off" aria-label="Brand">
@@ -36,29 +44,55 @@
       <option value="nameAsc">Name A&ndash;Z</option>
     </select>
     <label class="check"><input id="cheaper" type="checkbox"> cheaper than eMag</label>
-    <label class="check"><input id="onlyWish" type="checkbox"> kept only</label>
+    <label class="check"><input id="onlyWish" type="checkbox"> liked only</label>
+    <button id="tagsOpen" class="ghost" type="button" aria-expanded="false">Sections <b id="nTags"></b></button>
     <button id="reset" class="ghost" type="button">Clear</button>
+  </div>
+  <div class="wrap" id="tagBox" hidden>
+    <div class="railhead">
+      <span class="note-in">Pick the sections you want. A product carries every section it was listed under.</span>
+      <span class="seg" role="radiogroup" aria-label="Section match">
+        <button data-match="any" type="button" role="radio" aria-checked="true">any of them</button>
+        <button data-match="all" type="button" role="radio" aria-checked="false">all of them</button>
+      </span>
+    </div>
+    <div id="tagRail" class="tagrail"></div>
   </div>
 </section>
 
 <main class="wrap">
-  <div id="loading" class="note"><p>Loading the product list&hellip;</p></div>
-  <p id="blocked" class="warn" hidden>Your browser is refusing to let this page read emag.ro, so the
-  eMag column stays empty. Install <a href="tools/emaglist.user.js">tools/emaglist.user.js</a> in
-  Tampermonkey or Violentmonkey and reload.</p>
-  <div id="grid" class="grid"></div>
-  <p id="empty" class="note" hidden>Nothing in the list matches that.</p>
-  <nav id="pager" class="pager" aria-label="Pages"></nav>
-  <p id="pageNote" class="foot"></p>
+
+  <section id="view-catalog" class="view">
+    <div id="loading" class="note"><p>Loading the product list&hellip;</p></div>
+    <p id="blocked" class="warn" hidden></p>
+    <div id="grid" class="grid"></div>
+    <p id="empty" class="note" hidden>Nothing in the list matches that.</p>
+    <nav id="pager" class="pager" aria-label="Pages"></nav>
+    <p id="pageNote" class="foot"></p>
+  </section>
+
+  <section id="view-deals" class="view" hidden></section>
+  <section id="view-liked" class="view" hidden></section>
+  <section id="view-compare" class="view" hidden></section>
+  <section id="view-settings" class="view" hidden></section>
+
 </main>
+
+<div id="dock" class="dock" hidden>
+  <div class="wrap">
+    <div id="dockPics" class="dockpics"></div>
+    <span class="dockmsg">Picked for compare</span>
+    <a class="btn" href="#/compare">Compare <b id="dockN"></b></a>
+    <button id="dockClear" class="ghost" type="button">Clear</button>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
 <footer class="wrap small">
   <p>List prices come from <em>Listă produse &ndash; Preț BF Promo (cu TVA)</em>. eMag prices are read from
-  eMag's own search results when a card reaches the screen, and kept for a day.</p>
-  <p>A page on github.io is not allowed to read emag.ro &mdash; the browser fetches the reply and then
-  refuses to hand it over, and eMag sends nothing that waives that. Installing
-  <a href="tools/emaglist.user.js">tools/emaglist.user.js</a> in Tampermonkey or Violentmonkey lets this
-  page read eMag on your own device. Without it the cards say so instead of showing a price.</p>
+  eMag's own search results when a card reaches the screen, and kept in this browser.</p>
+  <p id="srcFoot"></p>
 </footer>
 
 <script src="app.js"></script>

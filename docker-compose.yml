@@ -1,0 +1,36 @@
+# docker compose up -d --build
+# docker compose logs tunnel | grep trycloudflare
+#
+# Two containers: the site with its eMag reader, and a Cloudflare quick tunnel that gives it a
+# public https address without an account, a domain or an open port on your router. The address
+# is random and lasts only as long as the tunnel container does.
+
+services:
+  app:
+    build: .
+    image: bfemag:latest
+    container_name: bfemag
+    restart: unless-stopped
+    ports:
+      - "8080:8080"          # http://localhost:8080 while you are at the machine
+    environment:
+      EMAG_CONCURRENCY: "3"  # eMag requests in flight at once
+      EMAG_GAP_MS: "250"     # smallest space between two of them
+      EMAG_TTL_MIN: "30"     # how long an answer is reused
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: bfemag-tunnel
+    restart: unless-stopped
+    depends_on:
+      - app
+    # A quick tunnel: free, no login, no named tunnel to configure. cloudflared prints the
+    # https://<random>.trycloudflare.com address to its log as soon as it is up.
+    command: tunnel --no-autoupdate --url http://app:8080
+    security_opt:
+      - no-new-privileges:true
