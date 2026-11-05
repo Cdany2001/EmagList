@@ -342,6 +342,13 @@ function wire() {
 (async function boot() {
   const t = load('bf.theme', null);
   if (t) document.documentElement.dataset.theme = t;
+  // The build before this one kept the catalog in Cache Storage and settings under el.*. Nothing
+  // reads either any more, and a stale copy of it is the likeliest reason that build stopped
+  // loading on a machine that had used it, so throw it out on the way past.
+  try {
+    caches.keys().then(ks => ks.forEach(k => /^emaglist-/.test(k) && caches.delete(k)));
+    Object.keys(localStorage).forEach(k => k.indexOf('el.') === 0 && localStorage.removeItem(k));
+  } catch (e) {}
   try {
     const r = await fetch('products.json');
     if (!r.ok) throw new Error('products.json answered ' + r.status);
