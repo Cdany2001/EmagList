@@ -340,7 +340,7 @@ async function viaLocal(url) {
     return await r.text();
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('Timed out');
-    if (e instanceof TypeError) { localOK = false; localProbe = null; throw new Error('Nothing is listening on ' + localBase()); }
+    if (e instanceof TypeError) { localOK = false; localProbe = null; throw new Error('No answer from ' + localBase() + ' — not started, or this browser will not let the page reach it'); }
     throw e;
   } finally { clearTimeout(to); }
 }
@@ -1062,6 +1062,7 @@ function renderSettings() {
 
       <details${settings.source === 'local' ? ' open' : ''}><summary>This computer — a reader you start yourself</summary>
         <p>Run <code>node tools/emag-proxy.js</code> in the project folder and leave it open. It fetches eMag at three requests at a time, keeps each answer for half an hour and refuses any address that is not eMag.</p>
+        <p class="note">Some browsers will not let a page served over https talk to your own machine at all. If the test below fails while the reader is plainly running, that is why — use the userscript or the extension instead, which have nothing to reach.</p>
         <div class="row"><label for="sPort">Port</label><input id="sPort" type="number" min="1" max="65535" value="${settings.localPort || 8787}" style="max-width:110px"><span class="note">matches <code>PORT=</code> if you moved it</span></div>
       </details>
 

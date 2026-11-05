@@ -39,6 +39,12 @@ It listens on `http://127.0.0.1:8787`, fetches eMag three requests at a time wit
 each answer for half an hour, and refuses any address that is not eMag — and any caller that is not
 this site. `PORT=9000 node tools/emag-proxy.js` moves it; set the same number in Settings.
 
+Note that some browsers refuse to let a page served over https reach your own machine, whatever the
+page is. The Claude desktop browser does (`ERR_BLOCKED_BY_CLIENT`); Chrome generally does not, but
+may ask for permission first. If the connection test fails while the reader is plainly running, that
+is the reason — the userscript and the extension have nothing to reach and are not affected. Opening
+the site locally instead (`node .claude/static-server.js`, or any static server) also sidesteps it.
+
 Public CORS proxies are still in Settings as a last resort, but somebody else's server then sees your
 whole list and can be blocked or switched off without warning. Every public one was failing when this
 was written.
