@@ -1,144 +1,66 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>BF List vs eMag</title>
-<meta name="description" content="34,083 Black Friday list prices compared with live eMag prices. Filter, tag, wishlist and compare.">
-<meta name="theme-color" content="#1C2140">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M6 30 30 6h24a4 4 0 0 1 4 4v24L34 58a4 4 0 0 1-6 0L6 36a4 4 0 0 1 0-6z' fill='%23FFD23F' stroke='%231C2140' stroke-width='4'/%3E%3Ccircle cx='44' cy='20' r='5' fill='%231C2140'/%3E%3C/svg%3E">
-<link rel="preload" href="data/index.json" as="fetch" type="application/json" crossorigin>
-<link rel="preload" href="data/c0.json" as="fetch" type="application/json" crossorigin>
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BF list vs eMag</title>
+<meta name="description" content="The Black Friday promo list, page by page, with each product's current eMag price fetched when the card reaches the screen.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#127991;</text></svg>">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-<noscript><link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" rel="stylesheet"></noscript>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<header class="topbar">
-  <a class="brandmark" href="#/catalog" aria-label="Catalog">
-    <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M6 30 30 6h24a4 4 0 0 1 4 4v24L34 58a4 4 0 0 1-6 0L6 36a4 4 0 0 1 0-6z"/><circle cx="44" cy="20" r="5"/></svg>
-    <span>BF list <em>vs</em> eMag</span>
-  </a>
-  <div class="search">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-    <input id="q" type="search" placeholder="Search 34,083 products, brands, tags" autocomplete="off" enterkeyhint="search">
+
+<header class="top">
+  <div class="wrap">
+    <div class="title">
+      <h1>BF list <span>vs</span> eMag</h1>
+      <p id="count">loading the list&hellip;</p>
+    </div>
+    <button id="theme" class="ghost" type="button" title="Light or dark">&#9680;</button>
   </div>
-  <nav class="views" aria-label="Views">
-    <a href="#/catalog" data-view="catalog">Catalog</a>
-    <a href="#/wishlists" data-view="wishlists">Wishlists <b id="wlCount"></b></a>
-    <a href="#/compare" data-view="compare">Compare <b id="cmpCount"></b></a>
-    <a href="#/settings" data-view="settings" aria-label="Settings">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-      <span class="sr-only">Settings</span>
-    </a>
-  </nav>
 </header>
 
-<main id="app">
-  <section id="view-catalog" class="view">
-    <aside id="filters" class="filters" aria-label="Filters">
-      <div class="filters-head">
-        <h2>Filters</h2>
-        <button class="link" id="resetFilters" type="button">Reset</button>
-        <button class="icon close-drawer" id="closeFilters" type="button" aria-label="Close filters">×</button>
-      </div>
+<section class="bar">
+  <div class="wrap">
+    <input id="q" type="search" placeholder="Search the list&hellip;" autocomplete="off" aria-label="Search by name, brand or tag">
+    <input id="brand" list="brands" placeholder="Brand" autocomplete="off" aria-label="Brand">
+    <datalist id="brands"></datalist>
+    <select id="sort" aria-label="Sort">
+      <option value="order">List order</option>
+      <option value="saveDesc">Biggest saving (lei)</option>
+      <option value="savePctDesc">Biggest saving (%)</option>
+      <option value="priceAsc">List price, low to high</option>
+      <option value="priceDesc">List price, high to low</option>
+      <option value="nameAsc">Name A&ndash;Z</option>
+    </select>
+    <label class="check"><input id="cheaper" type="checkbox"> cheaper than eMag</label>
+    <label class="check"><input id="onlyWish" type="checkbox"> kept only</label>
+    <button id="reset" class="ghost" type="button">Clear</button>
+  </div>
+</section>
 
-      <div class="fgroup">
-        <h3>Sort by</h3>
-        <select id="sort">
-          <option value="order">List order</option>
-          <option value="diffPctDesc">Biggest saving vs eMag (%)</option>
-          <option value="diffDesc">Biggest saving vs eMag (lei)</option>
-          <option value="diffPctAsc">eMag cheapest first (%)</option>
-          <option value="diffAsc">eMag cheapest first (lei)</option>
-          <option value="priceAsc">List price, low to high</option>
-          <option value="priceDesc">List price, high to low</option>
-          <option value="emagAsc">eMag price, low to high</option>
-          <option value="emagDesc">eMag price, high to low</option>
-          <option value="nameAsc">Name, A to Z</option>
-        </select>
-      </div>
-
-      <div class="fgroup">
-        <h3>Tags <span class="hint">tap once to include, twice to exclude</span></h3>
-        <div class="seg" role="radiogroup" aria-label="Tag match">
-          <label><input type="radio" name="tagMode" value="any" checked> Any</label>
-          <label><input type="radio" name="tagMode" value="all"> All</label>
-        </div>
-        <div id="tagChips" class="chips"></div>
-        <details class="moretags">
-          <summary>All tags</summary>
-          <input id="tagSearch" type="search" placeholder="Find a tag">
-          <div id="allTagChips" class="chips"></div>
-        </details>
-      </div>
-
-      <div class="fgroup">
-        <h3>Brand</h3>
-        <input id="brand" list="brandList" placeholder="Any brand">
-        <datalist id="brandList"></datalist>
-      </div>
-
-      <div class="fgroup">
-        <h3>List price (lei)</h3>
-        <div class="range"><input id="pMin" type="number" inputmode="decimal" placeholder="Min"><span>to</span><input id="pMax" type="number" inputmode="decimal" placeholder="Max"></div>
-      </div>
-
-      <div class="fgroup">
-        <h3>Vs eMag</h3>
-        <label class="check"><input type="checkbox" id="hasEmag"> Only items with an eMag price</label>
-        <label class="check"><input type="checkbox" id="cheaper"> Only where my list is cheaper</label>
-        <p class="sub">Saving %</p>
-        <div class="range"><input id="dMin" type="number" inputmode="decimal" placeholder="Min %"><span>to</span><input id="dMax" type="number" inputmode="decimal" placeholder="Max %"></div>
-        <p class="sub">Saving lei</p>
-        <div class="range"><input id="lMin" type="number" inputmode="decimal" placeholder="Min"><span>to</span><input id="lMax" type="number" inputmode="decimal" placeholder="Max"></div>
-      </div>
-
-      <div class="fgroup">
-        <h3>Wishlist</h3>
-        <select id="inList"><option value="">Everything</option></select>
-      </div>
-    </aside>
-
-    <div class="results">
-      <div class="resultbar">
-        <button class="btn ghost open-filters" id="openFilters" type="button">Filters <b id="activeCount"></b></button>
-        <p id="count" aria-live="polite"></p>
-        <button class="btn" id="batchFetch" type="button">Load eMag prices for these</button>
-      </div>
-      <div id="batchBar" class="batchbar" hidden>
-        <div class="progress"><span id="batchFill"></span></div>
-        <p id="batchText"></p>
-        <button class="link" id="batchStop" type="button">Stop</button>
-      </div>
-      <div id="grid" class="grid"></div>
-      <div id="sentinel" class="sentinel"></div>
-      <p id="empty" class="empty" hidden>No products match these filters. Remove a tag or widen the price range.</p>
-    </div>
-  </section>
-
-  <section id="view-wishlists" class="view" hidden></section>
-  <section id="view-compare" class="view" hidden></section>
-  <section id="view-settings" class="view" hidden></section>
+<main class="wrap">
+  <div id="loading" class="note"><p>Loading the product list&hellip;</p></div>
+  <p id="blocked" class="warn" hidden>Your browser is refusing to let this page read emag.ro, so the
+  eMag column stays empty. Install <a href="tools/emaglist.user.js">tools/emaglist.user.js</a> in
+  Tampermonkey or Violentmonkey and reload.</p>
+  <div id="grid" class="grid"></div>
+  <p id="empty" class="note" hidden>Nothing in the list matches that.</p>
+  <nav id="pager" class="pager" aria-label="Pages"></nav>
+  <p id="pageNote" class="foot"></p>
 </main>
 
-<div id="compareDock" class="dock" hidden>
-  <div id="dockThumbs" class="dock-thumbs"></div>
-  <a class="btn" href="#/compare">Compare <span id="dockN"></span></a>
-  <button class="link" id="dockClear" type="button">Clear</button>
-</div>
+<footer class="wrap small">
+  <p>List prices come from <em>Listă produse &ndash; Preț BF Promo (cu TVA)</em>. eMag prices are read from
+  eMag's own search results when a card reaches the screen, and kept for a day.</p>
+  <p>A page on github.io is not allowed to read emag.ro &mdash; the browser fetches the reply and then
+  refuses to hand it over, and eMag sends nothing that waives that. Installing
+  <a href="tools/emaglist.user.js">tools/emaglist.user.js</a> in Tampermonkey or Violentmonkey lets this
+  page read eMag on your own device. Without it the cards say so instead of showing a price.</p>
+</footer>
 
-<dialog id="detail" class="sheet"></dialog>
-<dialog id="pickList" class="sheet small"></dialog>
-<div id="toast" class="toast" role="status" aria-live="polite"></div>
-
-<div id="loading" class="loading">
-  <div class="tag-spin" aria-hidden="true"></div>
-  <p>Loading…</p>
-</div>
-
-<script src="app.js" defer></script>
+<script src="app.js"></script>
 </body>
 </html>

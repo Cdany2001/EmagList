@@ -1,67 +1,38 @@
 # BF list vs eMag
 
-A static catalog of the 34,083 products from *Listă produse – Preț BF Promo (cu TVA)*, compared with live eMag prices. No backend: it runs entirely in the browser on GitHub Pages.
+The 34,083 products from *Listă produse – Preț BF Promo (cu TVA)*, shown a page at a time, each
+card comparing the list price with eMag's current one. Three files and a JSON: no build step, no
+backend, no helper running anywhere.
 
-## Features
+## How it works
 
-- Catalog of all 34,083 products with a picture, list price, eMag price, and a sticker showing the saving vs eMag (lei and %)
-- Sort and filter by saving (lei or %), list price, eMag price, brand, wishlist, and tags
-- Tags on every product: category, brand, and audience (men, women, kids…) built from the names, plus eMag's own categories once an item is loaded, plus your own tags
-- Tap a tag once to include it, twice to exclude it, with Any/All matching
-- "Open in eMag" on every card
-- Multiple wishlists with budget, totals, and savings, stored in `localStorage`
-- Compare up to 4 products side by side, including eMag specifications
-- CSV export (all products, or a wishlist), plus backup and restore of your data
+1. **The list is hardcoded.** `products.json` holds all 34,083 rows as `[nr, name, price, brandIndex, [tagIndexes]]`. It is fetched once at startup — 3.6 MB raw, which GitHub Pages serves gzipped at about 890 KB — and shown 60 products a page.
+2. **eMag is asked per card, by name.** eMag has no way of being asked for a product by title, so the app searches `emag.ro/search/<first ten words of the name>`, then picks the result whose name is closest to ours: an exact name wins outright, otherwise the best token overlap, with model numbers (`HF5075`, `A2316`) weighted four times a plain word and eMag's own ranking breaking a tie. That result's price, previous price and picture are what the card shows; if the match is thin the name is printed under the title in red so you can see what it settled on.
+3. **Nothing is fetched before it is needed.** Each card is watched with an `IntersectionObserver`; it asks eMag once it comes within 400px of the viewport, and never before. Three requests run at a time. Answers are kept in `localStorage` for a day (the most recent 4,000), so paging back and forth does not ask twice.
+4. **No proxy and no helper.** The app makes exactly one kind of request to eMag — a plain `fetch` — and contains no transport code beyond it.
 
-## How eMag data is loaded
+## The one thing that needs installing
 
-eMag has no public API, and a page served from github.io is not allowed to read emag.ro's replies: the
-browser fetches them and then refuses to hand them to a script from another origin. Something on your
-own device has to make the request instead. There are three ways, and **Settings → Where eMag prices
-come from** picks between them (the default, *Whatever is available*, tries them in this order):
+A page served from `github.io` is not allowed to read `emag.ro`: the browser makes the request and
+then refuses to hand the reply to a script from another origin, and eMag sends no header that
+waives it. Nothing in the page can change that, so point 4 above has a cost — without help, every
+card reports the block instead of a price.
 
-**1. A userscript — nothing to run.** Install [Tampermonkey](https://www.tampermonkey.net/) or
-Violentmonkey, then open [`tools/emaglist.user.js`](tools/emaglist.user.js) and confirm the install.
-It fetches eMag inside your browser and hands the page back. It only touches `emag.ro`, and only on
-this site.
-
-**2. The extension — also nothing to run.** Download `tools/extension/`, open `chrome://extensions`,
-switch on Developer mode and press *Load unpacked* on that folder. Same job, same limits, no
-userscript manager needed.
-
-**3. A reader on this computer.** In the project folder:
-
-```
-node tools/emag-proxy.js
-```
-
-It listens on `http://127.0.0.1:8787`, fetches eMag three requests at a time with a 250 ms gap, keeps
-each answer for half an hour, and refuses any address that is not eMag — and any caller that is not
-this site. `PORT=9000 node tools/emag-proxy.js` moves it; set the same number in Settings.
-
-Note that some browsers refuse to let a page served over https reach your own machine, whatever the
-page is. The Claude desktop browser does (`ERR_BLOCKED_BY_CLIENT`); Chrome generally does not, but
-may ask for permission first. If the connection test fails while the reader is plainly running, that
-is the reason — the userscript and the extension have nothing to reach and are not affected. Opening
-the site locally instead (`node .claude/static-server.js`, or any static server) also sidesteps it.
-
-Public CORS proxies are still in Settings as a last resort, but somebody else's server then sees your
-whole list and can be blocked or switched off without warning. Every public one was failing when this
-was written.
-
-Whichever way the request goes, the result is cached in IndexedDB, so each product is read at most
-once every 72 hours (configurable). Cards on screen load on their own; *Load eMag prices for these*
-does the whole filtered view. If eMag picks the wrong product, open the product and paste the exact
-eMag link or the price under **Fix the eMag match**.
+Install [Tampermonkey](https://www.tampermonkey.net/) or Violentmonkey, open
+[`tools/emaglist.user.js`](tools/emaglist.user.js) and confirm. It takes over `fetch` for
+`emag.ro` addresses only and makes those requests through the userscript manager, which is not
+bound by that rule. 50 lines, one site, no server.
 
 ## Files
 
-- `index.html`, `styles.css`, `app.js`: the app (no build step)
-- `data/index.json` + `data/c0.json`…`c136.json`: the catalog in 250-product chunks, fetched as you scroll. The index holds the product count, the tag and brand tables and a count per tag, which is enough to lay out all 34,083 rows before any of them have arrived
-- `products.json`: the whole list as `[nr, name, price, brandIndex, [tagIndexes]]`. Nothing fetches it; it is the source `tools/split-data.js` splits into `data/`
-- `tools/emag-proxy.js`, `tools/emaglist.user.js`, `tools/extension/`: the three ways of reading eMag from your own device
-- 117 products have the name `0` and 216 have no name in the source PDF. They are kept and tagged `no-name`. 61 products have no price and are tagged `no-price`.
+- `index.html`, `styles.css`, `app.js` — the app
+- `products.json` — the list
+- `tools/emaglist.user.js` — the userscript described above
+
+117 products are named `0` and 216 have no name in the source PDF; they are kept and shown as
+*(no name in the source list)*. 61 have no list price.
 
 ## Deploy
 
-GitHub → repository **Settings → Pages → Build and deployment → Deploy from a branch → `main` / root**. The site appears at `https://cdany2001.github.io/EmagList/`.
+GitHub → **Settings → Pages → Deploy from a branch → `main` / root**. The site is at
+<https://cdany2001.github.io/EmagList/>.

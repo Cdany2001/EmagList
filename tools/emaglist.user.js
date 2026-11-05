@@ -1,8 +1,9 @@
 // ==UserScript==
-// @name         BF List vs eMag -- price reader
-// @namespace    https://github.com/Cdany2001/EmagList
-// @version      1.0
-// @description  Lets the BF List page read eMag prices from your own browser, with no proxy in between.
+// @name         BF list vs eMag - let the page read eMag
+// @namespace    https://cdany2001.github.io/EmagList/
+// @version      3.0.0
+// @description  Lets the BF list page read emag.ro search pages from your own browser. Nothing else.
+// @author       -
 // @match        https://cdany2001.github.io/EmagList/*
 // @match        http://localhost:4173/*
 // @match        http://127.0.0.1:4173/*
@@ -11,39 +12,44 @@
 // @run-at       document-start
 // ==/UserScript==
 
-/* Why this exists: emag.ro sends no CORS headers, so the page itself is not allowed to read its
-   replies -- the browser fetches them and then refuses to hand them over. A userscript is not bound
-   by that, so the page asks this script instead and this script does the fetching. Same browser,
-   same address, same cookies-free request; nothing leaves your machine except the request to eMag. */
+/* The page itself only ever calls fetch(). A script on github.io is not allowed to read a reply
+   from emag.ro, so this userscript takes over fetch for emag.ro addresses alone and makes the
+   request through your userscript manager instead, which is not bound by that rule. Every other
+   address -- including products.json -- goes to the browser's own fetch untouched.
+
+   It runs only on the pages listed above, and it will only talk to emag.ro. */
 (function () {
   'use strict';
-  var ALLOW = /^https:\/\/([a-z0-9-]+\.)*emag\.ro(\/|$)/i;
-  var UA = navigator.userAgent;
 
-  function reply(msg) { window.postMessage(msg, location.origin); }
+  const real = window.fetch.bind(window);
+  const mine = u => /^https?:\/\/([a-z0-9-]+\.)*emag\.ro\//i.test(u);
 
-  window.addEventListener('message', function (e) {
-    // only the page this script was matched into, never a frame or another tab
-    if (e.source !== window || e.origin !== location.origin) return;
-    var d = e.data;
-    if (!d || d.emaglist !== 'ask') return;
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (!mine(url)) return real(input, init);
 
-    if (d.hello) { reply({ emaglist: 'here', via: 'userscript' }); return; }
-    if (!ALLOW.test(d.url || '')) { reply({ emaglist: 'say', id: d.id, ok: false, error: 'only emag.ro addresses' }); return; }
-
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: d.url,
-      timeout: 20000,
-      headers: { 'Accept': 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8', 'Accept-Language': 'ro-RO,ro;q=0.9,en;q=0.8', 'User-Agent': UA },
-      onload: function (r) { reply({ emaglist: 'say', id: d.id, ok: r.status >= 200 && r.status < 400, status: r.status, body: r.responseText }); },
-      onerror: function () { reply({ emaglist: 'say', id: d.id, ok: false, error: 'eMag did not answer' }); },
-      ontimeout: function () { reply({ emaglist: 'say', id: d.id, ok: false, error: 'Timed out' }); },
+    return new Promise(function (resolve, reject) {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: url,
+        timeout: 20000,
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'ro-RO,ro;q=0.9,en;q=0.8',
+        },
+        onload: function (r) {
+          resolve(new Response(r.responseText, {
+            status: r.status,
+            statusText: r.statusText || '',
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          }));
+        },
+        onerror: function () { reject(new TypeError('eMag could not be reached')); },
+        ontimeout: function () { reject(new TypeError('eMag took too long to answer')); },
+        onabort: function () { reject(new TypeError('the request to eMag was cancelled')); },
+      });
     });
-  });
+  };
 
-  // the page may have finished loading before this script ran, or the other way round, so say hello
-  // both on arrival and whenever asked
-  reply({ emaglist: 'here', via: 'userscript' });
-  document.addEventListener('DOMContentLoaded', function () { reply({ emaglist: 'here', via: 'userscript' }); });
+  window.__emagReaderReady = true;
 })();
