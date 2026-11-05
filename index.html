@@ -7,9 +7,12 @@
 <meta name="description" content="34,083 Black Friday list prices compared with live eMag prices. Filter, tag, wishlist and compare.">
 <meta name="theme-color" content="#1C2140">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M6 30 30 6h24a4 4 0 0 1 4 4v24L34 58a4 4 0 0 1-6 0L6 36a4 4 0 0 1 0-6z' fill='%23FFD23F' stroke='%231C2140' stroke-width='4'/%3E%3Ccircle cx='44' cy='20' r='5' fill='%231C2140'/%3E%3C/svg%3E">
+<link rel="preload" href="data/index.json" as="fetch" type="application/json" crossorigin>
+<link rel="preload" href="data/c0.json" as="fetch" type="application/json" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" rel="stylesheet"></noscript>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -133,7 +136,7 @@
 
 <div id="loading" class="loading">
   <div class="tag-spin" aria-hidden="true"></div>
-  <p>Loading 34,083 products…</p>
+  <p>Loading…</p>
 </div>
 
 <script src="app.js" defer></script>

@@ -1,4 +1,4 @@
-/* BF list vs eMag — static catalog. No backend: data/products.json + localStorage + IndexedDB. */
+/* BF list vs eMag — static catalog. No backend: data/ chunks + localStorage + IndexedDB. */
 'use strict';
 
 // ---------------------------------------------------------------- utilities
@@ -84,7 +84,100 @@ function putCache(id, val) {
 function clearCache() {
   cache.clear();
   if (db) try { db.transaction('emag', 'readwrite').objectStore('emag').clear(); } catch {}
-  ITEMS.forEach(it => (it._tags = null));
+  ITEMS.forEach(it => (it._tags = it._hay = null));
+}
+
+// ---------------------------------------------------------------- catalog, fetched in chunks
+// The full list is 3.5 MB of JSON and three quarters of that is product names, so downloading all
+// of it to draw twenty-four cards was the whole of the wait. data/index.json carries the tag and
+// brand vocabularies and the product count -- enough to lay every row out at the right height --
+// and each data/cN.json holds 250 products, fetched when the scroller reaches them. Searching,
+// filtering and sorting look across the whole list, so those pull the rest in first.
+const DATA_DIR = 'data/';
+let CHUNK = 250, CHUNKS = 0, FIRST_ID = 1, chunkState = [], loadingAll = false;
+const chunkOfRow = i => Math.floor(i / CHUNK);
+const chunkOfId = id => Math.floor((id - FIRST_ID) / CHUNK);
+const haveAll = () => CHUNKS > 0 && chunkState.every(v => v === 2);
+// a row nobody has downloaded yet still draws a card, so the scrollbar and the row height stay
+// honest before its chunk lands; the negative id keeps it out of BY_ID and the wishlists
+const placeholder = i => ({ id: -1 - i, name: '', price: null, brand: '', base: [], pending: true });
+
+async function loadIndex() {
+  const r = await fetch(DATA_DIR + 'index.json');
+  if (!r.ok) throw new Error('data/index.json is missing. Run: node tools/split-data.js');
+  const ix = await r.json();
+  BASE_TAGS = ix.tags; BRANDS = ix.brands;
+  TAG_SEED = ix.tags.map((t, i) => [t, ix.counts[i]]);
+  CHUNK = ix.chunk; CHUNKS = ix.chunks; FIRST_ID = ix.firstId;
+  chunkState = new Array(CHUNKS).fill(0);
+  ITEMS = new Array(ix.count);
+  for (let i = 0; i < ix.count; i++) ITEMS[i] = placeholder(i);
+}
+
+const chunkWait = new Map();
+function loadChunk(k) {
+  if (chunkState[k] === 2) return Promise.resolve(false);
+  if (chunkWait.has(k)) return chunkWait.get(k);
+  const p = (async () => {
+    try {
+      const r = await fetch(DATA_DIR + 'c' + k + '.json');
+      if (!r.ok) throw new Error('chunk ' + k + ' is missing');
+      const rows = await r.json(), at = k * CHUNK;
+      for (let j = 0; j < rows.length; j++) {
+        const [id, name, price, b, t] = rows[j];
+        const it = { id, name, price, brand: b >= 0 ? BRANDS[b] : '', base: t.map(i => BASE_TAGS[i]) };
+        ITEMS[at + j] = it; BY_ID.set(id, it);
+      }
+      chunkState[k] = 2;
+      return true;
+    } catch { chunkState[k] = 0; return false; }
+    finally { chunkWait.delete(k); }
+  })();
+  chunkState[k] = 1; chunkWait.set(k, p);
+  return p;
+}
+
+// what the virtual scroller is showing is what gets downloaded
+function ensureRows(from, to) {
+  const a = chunkOfRow(Math.max(0, from)), b = chunkOfRow(Math.max(0, to - 1));
+  const jobs = [];
+  for (let k = a; k <= b && k < CHUNKS; k++) if (chunkState[k] !== 2) jobs.push(loadChunk(k));
+  if (jobs.length) Promise.all(jobs).then(got => got.some(Boolean) && catalogGrew());
+}
+async function ensureIds(ids) {
+  const ks = [...new Set(ids.map(chunkOfId))].filter(k => k >= 0 && k < CHUNKS && chunkState[k] !== 2);
+  if (!ks.length) return false;
+  return (await Promise.all(ks.map(loadChunk))).some(Boolean);
+}
+function catalogGrew() {
+  if ($('#view-catalog').hidden) return;
+  RESULTS = filtered();
+  renderWindow(true);
+  updateCountNow();
+}
+
+const wholeListNeeded = () => !!(F.q.trim() || F.inc.length || F.exc.length || F.brand.trim() || F.pMin || F.pMax ||
+  F.dMin || F.dMax || F.lMin || F.lMax || F.hasEmag || F.cheaper || F.inList || F.sort !== 'order');
+async function loadEverything() {
+  if (loadingAll || haveAll()) return;
+  loadingAll = true;
+  const todo = [];
+  for (let k = 0; k < CHUNKS; k++) if (chunkState[k] !== 2) todo.push(k);
+  const total = todo.length;
+  let done = 0;
+  // the count line doubles as the progress bar; six at a time keeps the connection busy without
+  // opening a hundred sockets on a phone
+  const worker = async () => {
+    for (;;) {
+      const k = todo.shift();
+      if (k === undefined) return;
+      await loadChunk(k);
+      done++;
+      $('#count').innerHTML = 'Fetching the rest of the list to search it… <strong>' + Math.round(100 * done / total) + '%</strong>';
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  loadingAll = false;
 }
 
 // ---------------------------------------------------------------- data
@@ -111,10 +204,9 @@ function tagsOf(it) {
   const c = cache.get(it.id);
   if (c?.cats) c.cats.forEach(t => s.add('emag:' + t));
   it._tags = s;
-  it._hay = norm(it.name + ' ' + it.brand + ' ' + [...s].join(' '));
   return s;
 }
-const hayOf = it => (tagsOf(it), it._hay);
+const hayOf = it => it._hay || (it._hay = norm(it.name + ' ' + it.brand + ' ' + [...tagsOf(it)].join(' ')));
 const searchQuery = it => it.name.replace(/["'„”()]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 10).join(' ').slice(0, 90);
 const searchURL = it => 'https://www.emag.ro/search/' + encodeURIComponent(searchQuery(it));
 const emagLink = it => emagOf(it).url || searchURL(it);
@@ -272,7 +364,7 @@ async function fetchEmag(it, { deep = settings.deep } = {}) {
     rec.err = e.message;
     if (/proxy|network|timed out|blocked|failed/i.test(e.message)) failStreak++;
   }
-  putCache(it.id, rec); it._tags = null;
+  putCache(it.id, rec); it._tags = it._hay = null;
   if (failStreak >= 8 && settings.autoFetch && !paused) {
     paused = true;
     toast('eMag is not answering through the proxy. Auto-loading paused; check Settings.');
@@ -390,11 +482,11 @@ function cardHTML(it) {
   const e = emagOf(it), c = e.c;
   const low = c?.ok && c.score != null && c.score < 0.4 && !overrides[it.id]?.url;
   const groups = GROUP_TAGS.filter(t => it.base.includes(t)).slice(0, 2).join(' · ');
-  return `<article class="card" data-id="${it.id}">
+  return `<article class="card${it.pending ? ' pending' : ''}" data-id="${it.id}">
     <button class="pic" type="button" data-act="open" aria-label="Details">${picHTML(it)}${stickerHTML(it)}</button>
     <div class="body">
       <div class="brandline"><span>${esc(it.brand || '—')}</span><span>${esc(groups)}</span></div>
-      <h3 class="name" data-act="open" title="${esc(it.name)}">${esc(it.name || '(no name in source file)')}</h3>
+      <h3 class="name" data-act="open" title="${esc(it.name)}">${esc(it.name || (it.pending ? '' : '(no name in source file)'))}</h3>
       <div class="match ${low ? 'low' : ''}"${c?.ok && c.title ? ` title="${esc(c.title)}"` : ''}>${c?.ok && c.title ? (low ? 'Weak match: ' : 'eMag: ') + esc(c.title) : ''}</div>
       <div class="prices"><div><span class="lbl">My list</span><span class="mine">${lei(it.price)}</span></div>${theirsHTML(it)}</div>
     </div>
@@ -407,6 +499,9 @@ function cardHTML(it) {
   </article>`;
 }
 function renderCatalog(resetScroll = true) {
+  // render what is here and fill in behind: a filter over a half-downloaded list is honest about
+  // being partial for a moment, which beats a blank screen
+  if (wholeListNeeded() && !haveAll() && !loadingAll) loadEverything().then(() => renderCatalog(false));
   RESULTS = filtered();
   $('#grid').innerHTML = ''; firstRow = lastRow = -1;
   if (resetScroll && window.scrollY > 300) window.scrollTo({ top: 0 });
@@ -449,6 +544,7 @@ function renderWindow(force = false) {
   out.push(RESULTS.slice(first * cols, (last + 1) * cols).map(cardHTML).join(''));
   if (below > 0) out.push('<div class="vspace" style="height:' + (below * rowH - gap) + 'px"></div>');
   g.innerHTML = out.join('');
+  ensureRows(first * cols, (last + 1) * cols);
   syncWindowQueue();
 }
 // On demand means on screen: the rows the virtual scroller just drew are the only ones worth a
@@ -456,7 +552,7 @@ function renderWindow(force = false) {
 // through 34,083 products spends its requests on where you stopped, not on everything you passed.
 function syncWindowQueue() {
   if (batch || !settings.autoFetch || paused || firstRow < 0) return;
-  const want = RESULTS.slice(firstRow * cols, (lastRow + 1) * cols).filter(it => !fresh(it) && !inflight.has(it.id));
+  const want = RESULTS.slice(firstRow * cols, (lastRow + 1) * cols).filter(it => !it.pending && !fresh(it) && !inflight.has(it.id));
   const keep = new Set(want.map(it => it.id));
   for (let i = queue.length - 1; i >= 0; i--) if (!keep.has(queue[i].id) && !pinned.has(queue[i].id)) queue.splice(i, 1);
   for (const it of want) enqueue(it);
@@ -476,10 +572,15 @@ window.addEventListener('scroll', () => {
 window.addEventListener('resize', () => { cardH = 0; renderWindow(true); });
 
 // tag chips
-let TAG_COUNTS = new Map();
+let TAG_COUNTS = new Map(), TAG_SEED = [];
+// The counts for the list tags are tallied when the data is split, so the sidebar is right about
+// all 34,083 products on the first screen. Your own tags and the eMag categories live in small
+// local stores, and those are counted here.
 function countTags() {
-  TAG_COUNTS = new Map();
-  for (const it of ITEMS) for (const t of tagsOf(it)) TAG_COUNTS.set(t, (TAG_COUNTS.get(t) || 0) + 1);
+  TAG_COUNTS = new Map(TAG_SEED);
+  const bump = t => TAG_COUNTS.set(t, (TAG_COUNTS.get(t) || 0) + 1);
+  for (const list of Object.values(userTags)) for (const t of new Set(list)) bump(t);
+  for (const rec of cache.values()) if (rec.cats) for (const t of new Set(rec.cats)) bump('emag:' + t);
 }
 const debCount = debounce(() => { countTags(); renderTagChips(); }, 1500);
 function chip(t) {
@@ -506,8 +607,10 @@ function cycleTag(t) {
 
 // ---------------------------------------------------------------- batch fetch
 let batch = null;
-function startBatch() {
-  const todo = RESULTS.filter(it => !fresh(it));
+async function startBatch() {
+  // the button says these, meaning every product this view matches, so the view has to be whole first
+  if (!haveAll()) { toast('Fetching the rest of the list first…'); await loadEverything(); RESULTS = filtered(); renderWindow(true); updateCountNow(); }
+  const todo = RESULTS.filter(it => !it.pending && !fresh(it));
   if (!todo.length) return toast('Every product in this view already has fresh eMag data.');
   if (todo.length > 300 && !confirm(`This loads eMag data for ${todo.length.toLocaleString('ro-RO')} products, about ${settings.deep ? 2 : 1} requests each through the proxy. It can take a long time and eMag may start blocking. Continue?`)) return;
   paused = false; failStreak = 0;
@@ -568,6 +671,7 @@ function listTotals(l) {
   return { mine, theirs, save: theirs - both, missing };
 }
 function renderWishlists() {
+  ensureIds(wishlists.lists.flatMap(l => l.items)).then(got => got && renderWishlists());
   const v = $('#view-wishlists');
   if (!wishlists.lists.find(l => l.id === wishlists.active)) wishlists.active = wishlists.lists[0]?.id;
   const l = wishlists.lists.find(x => x.id === wishlists.active);
@@ -660,6 +764,7 @@ function nameSpecs(it) {
   return { out, parts };
 }
 function renderCompare() {
+  ensureIds(compare).then(got => got && renderCompare());
   const v = $('#view-compare');
   const items = compare.map(id => BY_ID.get(id)).filter(Boolean);
   if (!items.length) {
@@ -920,15 +1025,13 @@ function wire() {
 (async function boot() {
   applyTheme();
   try {
-    const getData = async () => { for (const u of ['products.json', 'data/products.json']) { try { const r = await fetch(u); if (r.ok) return r; } catch {} } throw new Error('products.json not found next to index.html'); };
-    const [res] = await Promise.all([getData(), openDB().then(loadCache)]);
-    const D = await res.json();
-    BASE_TAGS = D.tags; BRANDS = D.brands;
-    ITEMS = D.items.map(([id, name, price, b, t]) => ({ id, name, price, brand: b >= 0 ? D.brands[b] : '', base: t.map(i => D.tags[i]) }));
-    ITEMS.forEach(it => BY_ID.set(it.id, it));
-    $('#brandList').innerHTML = BRANDS.map(b => `<option value="${esc(b)}">`).join('');
+    await Promise.all([loadIndex(), openDB().then(loadCache)]);
+    await loadChunk(0);                       // the first screen, so it never opens on skeletons
     countTags();
     wire(); syncFilterUI(); route();
+    // the 1,223-entry brand datalist is not worth a frame of the first screen
+    const idle = window.requestIdleCallback || (fn => setTimeout(fn, 50));
+    idle(() => { $('#brandList').innerHTML = BRANDS.map(b => `<option value="${esc(b)}">`).join(''); });
   } catch (e) {
     $('#loading').innerHTML = `<p>Could not load the product list: ${esc(e.message)}</p>`;
     return;

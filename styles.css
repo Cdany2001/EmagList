@@ -214,6 +214,29 @@ select, input[type="number"], input[type="search"], input[list], input[type="url
 .prices .old { font-size: 11px; text-decoration: line-through; color: var(--ink-2); display: block; }
 .match { font-size: 11px; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; min-height: 1.4em; }
 .match.low { color: var(--lose); }
+
+/* A row whose chunk is still on the wire draws the real card markup with grey bars where the
+   words will be, so the row height the virtual scroller measured still holds under it. */
+.card.pending { pointer-events: none; }
+.card.pending .ph { background: var(--line); }
+.card.pending .ph span, .card.pending .match, .card.pending .prices .lbl { visibility: hidden; }
+.card.pending .brandline span, .card.pending .mine, .card.pending .theirs {
+  background: var(--line); border-radius: 4px; color: transparent;
+}
+.card.pending .brandline span:first-child { width: 42%; }
+.card.pending .brandline span:last-child { width: 22%; }
+.card.pending .name {
+  background:
+    linear-gradient(var(--line) 0 0) 0 .2em / 92% .7em no-repeat,
+    linear-gradient(var(--line) 0 0) 0 1.55em / 78% .7em no-repeat,
+    linear-gradient(var(--line) 0 0) 0 2.9em / 44% .7em no-repeat;
+}
+.card.pending .mine { width: 68%; }
+.card.pending .theirs { width: 84%; margin-left: auto; }
+.card.pending .actions { opacity: .25; }
+.card.pending .emaglink { visibility: hidden; }
+.card.pending .body { animation: skel 1.4s ease-in-out infinite; }
+@keyframes skel { 50% { opacity: .55; } }
 .actions { display: flex; gap: 6px; align-items: center; border-top: 1px solid var(--line); padding: 8px 10px; }
 .act {
   width: 36px; height: 36px; border-radius: 50%; border: 1.5px solid var(--line); background: transparent; cursor: pointer;
