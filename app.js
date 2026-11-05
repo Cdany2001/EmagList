@@ -23,7 +23,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const norm = s => String(s == null ? '' : s).normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const norm = MATCH.norm;   /* match.js, loaded just before this file */
 const nf = new Intl.NumberFormat('ro-RO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const ro = n => Number(n).toLocaleString('ro-RO');
 const lei = v => v == null || isNaN(v) ? '—' : nf.format(v) + ' lei';
@@ -94,9 +94,11 @@ const saveStore = debounce(() => {
 }, 1500);
 
 /* ---------------------------------------------------------------- reaching eMag */
-const searchQuery = it => it.name.replace(/["'„”()]/g, ' ')
-  .split(/\s+/).filter(Boolean).slice(0, 10).join(' ').slice(0, 90);
-const searchURL = it => 'https://www.emag.ro/search/' + encodeURIComponent(searchQuery(it));
+/* What to ask eMag about a product, and which of its answers is that product: both are match.js,
+   the one file the server requires too, so a row read in this page and a row read there cannot
+   disagree. The brand goes in because it is the one word in a name that cannot be wrong. */
+const searchURL = (it, tier) => MATCH.searchURL(it.name, tier, it.brand);
+const closest = (it, hits) => MATCH.closest(it.name, hits, { brand: it.brand });
 const linkFor = it => (emag.get(it.id) || {}).url || searchURL(it);
 
 let READER = null;   // null until probed, then true (something on this origin) or false
@@ -179,9 +181,19 @@ async function look(it, force) {
       });
       return;
     }
-    const hits = parseSearch(await get(searchURL(it)));
-    if (!hits.length) throw new Error('Nothing on eMag under this name');
-    emag.set(it.id, Object.assign({ t: Date.now() }, closest(it, hits)));
+    /* Two asks at most. The second goes out only when the first came back with nothing, or with
+       nothing that looks like the thing, and carries just the brand and the model. */
+    let best = null, any = 0;
+    for (let tier = 0; tier < MATCH.tiers; tier++) {
+      const hits = parseSearch(await get(searchURL(it, tier)));
+      any += hits.length;
+      const b = closest(it, hits);
+      if (b && b.price != null && (!best || b.score > best.score)) best = b;
+      if (best && best.score >= MATCH.THIN) break;
+    }
+    if (!any) throw new Error('Nothing on eMag under this name');
+    if (!best) throw new Error('No price on the closest result');
+    emag.set(it.id, Object.assign({ t: Date.now() }, best));
   } catch (e) {
     emag.set(it.id, { t: Date.now(), err: why(e) });
   }
@@ -231,36 +243,6 @@ function bump() {
   if (VIEW === 'catalog') return;
   clearTimeout(bumpT);
   bumpT = setTimeout(() => { bumpAt = Date.now(); draw[VIEW](); }, Math.max(0, 1200 - (Date.now() - bumpAt)));
-}
-
-/* eMag cannot be asked for a product by title, so the search results are all there is to go on: a
-   result whose name is ours wins outright, otherwise the best token overlap, with eMag's own
-   ranking breaking a tie. Model numbers count for most -- they are what identifies the thing.
-   The backend runs the same rules, so a row read there and a row read here agree. */
-function closest(it, hits) {
-  const want = norm(it.name);
-  const exact = hits.find(h => {
-    const t = norm(h.title);
-    return t === want || (want.length > 25 && (t.startsWith(want) || want.startsWith(t)));
-  });
-  if (exact) return Object.assign({ score: 1 }, exact);
-  let best = null;
-  hits.slice(0, 12).forEach((h, i) => {
-    const s = score(it.name, h.title) - i * 0.01;
-    if (!best || s > best.score) best = Object.assign({ score: +s.toFixed(2) }, h);
-  });
-  return best;
-}
-const tok = s => norm(s).split(/[^a-z0-9]+/).filter(t => t.length > 1);
-function score(mine, theirs2) {
-  const them = new Set(tok(theirs2));
-  let got = 0, tot = 0;
-  for (const t of tok(mine).slice(0, 14)) {
-    const w = /\d/.test(t) && /[a-z]/.test(t) ? 4 : /\d/.test(t) ? 1.5 : 1;
-    tot += w;
-    if (them.has(t)) got += w;
-  }
-  return tot ? got / tot : 0;
 }
 
 const absUrl = u => !u ? null
@@ -1606,6 +1588,12 @@ function wire() {
       tags: row[4].map(i => j.tags[i]),
     }));
     for (const it of ITEMS) byId.set(it.id, it);
+    /* Every word match.js uses is weighed by how rare it is across the whole list, so the list has
+       to be counted once before any name can be turned into a query or compared with a title. It
+       is counted here, where the 3.6 MB of JSON has just been parsed and a tenth of a second more
+       does not show, rather than lazily later, where the first page of sixty cards would be
+       building its eMag links with every word weighing the same. */
+    MATCH.learn(ITEMS.map(i => i.name));
 
     const n = new Map();
     for (const it of ITEMS) for (const t of it.tags) n.set(t, (n.get(t) || 0) + 1);

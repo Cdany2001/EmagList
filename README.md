@@ -95,18 +95,41 @@ off down to 320px, the narrowest phone still in use.
 ## How it works
 
 1. **The list is hardcoded.** `products.json` holds all 34,083 rows as `[nr, name, price, brandIndex, [tagIndexes]]` — 3.6 MB raw, about 880 KB gzipped — and is shown 60 products a page.
-2. **eMag is asked per product, by name.** eMag cannot be asked for a product by title, so it searches `emag.ro/search/<first ten words of the name>` and picks the result whose name is closest: an exact name wins outright, otherwise the best token overlap, with model numbers (`HF5075`, `ECAM450`) weighted four times a plain word and eMag's own ranking breaking a tie. A thin match prints the name it settled on, in red.
+2. **eMag is asked per product, by name.** eMag cannot be asked for a product by title, so the
+   name becomes a search and one of the results becomes the answer. Both halves of that are
+   [`match.js`](match.js), and both rest on one thing the list tells us about itself: a word nearly
+   every name uses says almost nothing about which product is meant, and a word two names use says
+   almost everything. `cu` is in 14,997 of the 34,083 names, `pantofi` in 7,147, `negru` in 8,484;
+   `goalgetter` is in 11 and `hf5075` in exactly one. So no word is weighted by hand. Every word is
+   weighted by how rare it is across the whole list, and that one idea is applied twice:
+
+   - **The query** is the words that carry the most information, in the order they were written and
+     never cut in half. Two slots are spoken for before rarity gets a say, because a search engine
+     wants different things from a name than a comparison does: the first word, which here is the
+     brand or what the thing is, and the brand itself, added in front when the name never says it.
+   - **The answer** is the result whose name shares the most rarity with ours, counted both ways —
+     missing our rare words is how a teamGOAL shirt becomes an Essentials one, carrying rare words
+     of its own is how a four-piece set gets in for a twenty-piece one — with three corrections
+     rarity gets wrong on its own: a colour that disagrees outright is a different product however
+     ordinary the word for it is, the brand is never allowed to weigh little, and a name made only
+     of words the list uses thousands of times over cannot produce a confident match at all. An
+     identical name still wins outright, and eMag's own ranking still breaks a tie.
+
+   A first ask that comes back with nothing, or with nothing convincing, is worth one retry
+   carrying just the brand and the model — which is how the twenty-piece Tefal set and the
+   Solarstrike 4 get found at all. A thin match prints the name it settled on, in red.
 3. **Nothing is fetched before it is needed.** Each card is watched with an `IntersectionObserver` and asks once it comes within 400 px of the viewport, three at a time.
 4. **An answer is read once.** On the self-hosted copy the first ask for a product goes to eMag and lands in the database; every later ask, from any device, is served from there, with the lowest price ever seen and a short price history kept alongside. **Force refresh** — the arrow on a card, or *Check these again* on a page — is the one thing that goes back to eMag for something already known.
 
 ## Files
 
 - `index.html`, `styles.css`, `app.js` — the page
+- `match.js` — what to ask eMag and which answer is the product; the page loads it, the server requires it
 - `products.json` — the list
 - `server.js` — the static server, the eMag reader and the API
 - `lib/store.js` — the database: profiles, sessions, prices, budgets, alerts, in one JSON file
 - `lib/catalog.js` — the list in memory, with the query and the section counts behind the filters
-- `lib/emag.js` — reading and parsing eMag search pages, and the name matcher
+- `lib/emag.js` — reading and parsing eMag search pages
 - `lib/watch.js` — the background watcher
 - `Dockerfile`, `docker-compose.yml` — the self-hosted stack
 - `tools/emaglist.user.js` — what the GitHub Pages copy needs instead

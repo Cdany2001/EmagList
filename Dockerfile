@@ -4,9 +4,9 @@
 FROM node:22-alpine
 
 WORKDIR /app
-COPY server.js ./
+COPY server.js match.js ./
 COPY lib/ ./lib/
-COPY index.html app.js styles.css products.json ./site/
+COPY index.html app.js match.js styles.css products.json ./site/
 
 # The one writable place. Compose mounts a volume over it; this line only makes sure the
 # directory exists and belongs to the user the server runs as.
