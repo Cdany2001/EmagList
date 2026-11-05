@@ -23,6 +23,7 @@
       <a href="#/catalog" data-view="catalog">Catalog</a>
       <a href="#/deals" data-view="deals">Top deals</a>
       <a href="#/liked" data-view="liked">Liked <b id="nWish"></b></a>
+      <a href="#/budget" data-view="budget">Budget <b id="nBud"></b></a>
       <a href="#/compare" data-view="compare">Compare <b id="nCmp"></b></a>
       <a href="#/settings" data-view="settings" title="Settings">Settings</a>
     </nav>
@@ -31,30 +32,82 @@
 </header>
 
 <section class="bar" id="bar">
-  <div class="wrap">
-    <input id="q" type="search" placeholder="Search the list&hellip;" autocomplete="off" aria-label="Search by name, brand or tag">
-    <input id="brand" list="brands" placeholder="Brand" autocomplete="off" aria-label="Brand">
+  <div class="wrap barrow">
+    <input id="q" class="in grow" type="search" placeholder="Search the list&hellip;" autocomplete="off" aria-label="Search by name, brand or section">
+    <input id="brand" class="in" list="brands" placeholder="Brand" autocomplete="off" aria-label="Brand">
     <datalist id="brands"></datalist>
-    <select id="sort" aria-label="Sort">
-      <option value="order">List order</option>
-      <option value="saveDesc">Biggest saving (lei)</option>
-      <option value="savePctDesc">Biggest saving (%)</option>
-      <option value="priceAsc">List price, low to high</option>
-      <option value="priceDesc">List price, high to low</option>
-      <option value="nameAsc">Name A&ndash;Z</option>
+    <select id="sort" class="in" aria-label="Sort">
+      <optgroup label="The list">
+        <option value="order">List order</option>
+        <option value="orderDesc">List order, reversed</option>
+        <option value="nameAsc">Name A&ndash;Z</option>
+        <option value="nameDesc">Name Z&ndash;A</option>
+        <option value="brandAsc">Brand A&ndash;Z</option>
+        <option value="priceAsc">List price, low to high</option>
+        <option value="priceDesc">List price, high to low</option>
+      </optgroup>
+      <optgroup label="Against eMag">
+        <option value="saveDesc">Biggest saving (lei)</option>
+        <option value="savePctDesc">Biggest saving (%)</option>
+        <option value="saveAsc">Worst deal first</option>
+        <option value="emagAsc">eMag price, low to high</option>
+        <option value="emagDesc">eMag price, high to low</option>
+        <option value="freshDesc">Checked most recently</option>
+      </optgroup>
     </select>
-    <label class="check"><input id="cheaper" type="checkbox"> cheaper than eMag</label>
     <label class="check"><input id="onlyWish" type="checkbox"> liked only</label>
     <button id="tagsOpen" class="ghost" type="button" aria-expanded="false">Sections <b id="nTags"></b></button>
+    <button id="moreOpen" class="ghost" type="button" aria-expanded="false" aria-controls="moreBox">More filters <b id="nMore"></b></button>
+    <button id="share" class="ghost" type="button" title="Copy a link that carries these filters">Copy link</button>
     <button id="reset" class="ghost" type="button">Clear</button>
   </div>
-  <div class="wrap" id="tagBox" hidden>
+
+  <div class="wrap panel-in" id="moreBox" hidden>
+    <label class="field"><span>eMag price</span>
+      <select id="state" class="in">
+        <option value="">any</option>
+        <option value="cheaper">cheaper on my list</option>
+        <option value="dearer">cheaper on eMag</option>
+        <option value="priced">has an eMag price</option>
+        <option value="unpriced">not checked yet</option>
+        <option value="nolist">no list price</option>
+      </select>
+    </label>
+    <label class="field"><span>List price from</span>
+      <input id="min" class="in sm" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+    </label>
+    <label class="field"><span>up to</span>
+      <input id="max" class="in sm" type="number" min="0" step="any" inputmode="decimal" placeholder="any">
+    </label>
+    <label class="field"><span>Saves at least</span>
+      <select id="minPct" class="in sm">
+        <option value="0">any</option>
+        <option value="5">5%</option>
+        <option value="10">10%</option>
+        <option value="20">20%</option>
+        <option value="30">30%</option>
+        <option value="50">50%</option>
+      </select>
+    </label>
+    <label class="field"><span>On the budget</span>
+      <select id="pickState" class="in">
+        <option value="">any</option>
+        <option value="picked">picked</option>
+        <option value="unbought">picked, not bought</option>
+        <option value="bought">already bought</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="wrap panel-in" id="tagBox" hidden>
     <div class="railhead">
-      <span class="note-in">Pick the sections you want. A product carries every section it was listed under.</span>
+      <span class="note-in" id="tagHint">A product carries every section it was listed under.</span>
       <span class="seg" role="radiogroup" aria-label="Section match">
         <button data-match="any" type="button" role="radio" aria-checked="true">any of them</button>
         <button data-match="all" type="button" role="radio" aria-checked="false">all of them</button>
       </span>
+      <button id="tagsClear" class="ghost sm" type="button">None</button>
+      <button id="tagsClose" class="ghost sm" type="button">Collapse</button>
     </div>
     <div id="tagRail" class="tagrail"></div>
   </div>
@@ -73,6 +126,7 @@
 
   <section id="view-deals" class="view" hidden></section>
   <section id="view-liked" class="view" hidden></section>
+  <section id="view-budget" class="view" hidden></section>
   <section id="view-compare" class="view" hidden></section>
   <section id="view-settings" class="view" hidden></section>
 
@@ -91,7 +145,7 @@
 
 <footer class="wrap small">
   <p>List prices come from <em>Listă produse &ndash; Preț BF Promo (cu TVA)</em>. eMag prices are read from
-  eMag's own search results when a card reaches the screen, and kept in this browser.</p>
+  eMag's own search results when a card reaches the screen, and kept for next time.</p>
   <p id="srcFoot"></p>
 </footer>
 

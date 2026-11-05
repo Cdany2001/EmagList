@@ -1,9 +1,10 @@
 # docker compose up -d --build
 # docker compose logs tunnel | grep trycloudflare
 #
-# Two containers: the site with its eMag reader, and a Cloudflare quick tunnel that gives it a
-# public https address without an account, a domain or an open port on your router. The address
-# is random and lasts only as long as the tunnel container does.
+# Two containers: the site with its eMag reader, profile logins, price database and the
+# background watcher, plus a Cloudflare quick tunnel that gives it a public https address
+# without an account, a domain or an open port on your router. The address is random and
+# lasts only as long as the tunnel container does.
 
 services:
   app:
@@ -16,7 +17,10 @@ services:
     environment:
       EMAG_CONCURRENCY: "3"  # eMag requests in flight at once
       EMAG_GAP_MS: "250"     # smallest space between two of them
-      EMAG_TTL_MIN: "30"     # how long an answer is reused
+      EMAG_TTL_MIN: "30"     # how long an answer is reused before it is read again
+      DATA_DIR: "/data"      # where the accounts, prices, budgets and alerts live
+    volumes:
+      - data:/data           # the only writable path, and the only state that survives a rebuild
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -34,3 +38,7 @@ services:
     command: tunnel --no-autoupdate --url http://app:8080
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  data:
+    name: bfemag-data

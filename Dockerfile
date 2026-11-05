@@ -1,12 +1,19 @@
-# The site and its eMag reader. Node's standard library is the whole dependency list, so there is
-# nothing to install and no lockfile to go stale -- the build is a copy.
+# The site, its eMag reader and the small database behind the budget page. The Node standard
+# library is the whole dependency list, so there is nothing to install and no lockfile to go
+# stale -- the build is a copy.
 FROM node:22-alpine
 
 WORKDIR /app
 COPY server.js ./
+COPY lib/ ./lib/
 COPY index.html app.js styles.css products.json ./site/
 
-ENV PORT=8080 NODE_ENV=production
+# The one writable place. Compose mounts a volume over it; this line only makes sure the
+# directory exists and belongs to the user the server runs as.
+RUN mkdir -p /data && chown -R node:node /data
+VOLUME ["/data"]
+
+ENV PORT=8080 NODE_ENV=production DATA_DIR=/data
 EXPOSE 8080
 USER node
 
