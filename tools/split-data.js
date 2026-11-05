@@ -34,6 +34,9 @@ fs.writeFileSync(path.join(out, 'index.json'), JSON.stringify(index));
 
 const ix = fs.statSync(path.join(out, 'index.json')).size;
 console.log(`${D.items.length} products -> ${chunks} chunks of ${CHUNK}`);
-console.log(`index.json ${(ix / 1024).toFixed(1)} KB, chunks ${(bytes / 1048576).toFixed(2)} MB total, ${(bytes / chunks / 1024).toFixed(1)} KB each`);
-console.log(`first screen now costs index + 1 chunk = ${((ix + bytes / chunks) / 1024).toFixed(1)} KB uncompressed`);
+// Chunk sizes vary a lot with the length of the names in them, so the first screen is quoted from
+// the chunk it actually fetches rather than from the average.
+const c0 = fs.statSync(path.join(out, 'c0.json')).size;
+console.log(`index.json ${(ix / 1024).toFixed(1)} KB, chunks ${(bytes / 1048576).toFixed(2)} MB total, ${(bytes / chunks / 1024).toFixed(1)} KB on average`);
+console.log(`first screen costs index + c0.json = ${((ix + c0) / 1024).toFixed(1)} KB uncompressed, was ${(fs.statSync(path.join(root, 'products.json')).size / 1048576).toFixed(2)} MB`);
 console.log(`ids sequential from ${firstId}: ${sequential}`);
